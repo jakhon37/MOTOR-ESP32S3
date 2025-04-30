@@ -2,7 +2,6 @@
 
 #include "MotorControl.h"
 
-// Initialize static members
 volatile int32_t MotorControl::leftEncoderCount = 0;
 volatile int32_t MotorControl::rightEncoderCount = 0;
 int32_t MotorControl::leftLastCount = 0;
@@ -10,7 +9,6 @@ int32_t MotorControl::rightLastCount = 0;
 uint32_t MotorControl::lastRPMTime = 0;
 
 void MotorControl::begin() {
-  // Configure motor control pins
   pinMode(LEFT_MOTOR_IN1, OUTPUT);
   pinMode(LEFT_MOTOR_IN2, OUTPUT);
   pinMode(RIGHT_MOTOR_IN1, OUTPUT);
@@ -18,23 +16,19 @@ void MotorControl::begin() {
   pinMode(LEFT_MOTOR_PWM, OUTPUT);
   pinMode(RIGHT_MOTOR_PWM, OUTPUT);
 
-  // Configure encoder pins
   pinMode(LEFT_ENCODER_A, INPUT);
   pinMode(LEFT_ENCODER_B, INPUT);
   pinMode(RIGHT_ENCODER_A, INPUT);
   pinMode(RIGHT_ENCODER_B, INPUT);
 
-  // Setup PWM channels using the LEDC API
   ledcSetup(0, PWM_FREQ, PWM_RESOLUTION);
   ledcAttachPin(LEFT_MOTOR_PWM, 0);
   ledcSetup(1, PWM_FREQ, PWM_RESOLUTION);
   ledcAttachPin(RIGHT_MOTOR_PWM, 1);
 
-  // Attach encoder interrupts
   attachInterrupt(digitalPinToInterrupt(LEFT_ENCODER_A), leftEncoderISR, RISING);
   attachInterrupt(digitalPinToInterrupt(RIGHT_ENCODER_A), rightEncoderISR, RISING);
 
-  // Initialize RPM timing
   leftLastCount = leftEncoderCount;
   rightLastCount = rightEncoderCount;
   lastRPMTime = millis();
@@ -57,7 +51,6 @@ void MotorControl::setMotorSpeed(uint8_t in1, uint8_t in2, uint8_t pwmPin, float
     digitalWrite(in1, LOW);
     digitalWrite(in2, LOW);
   }
-  // Write the PWM duty cycle to the appropriate channel
   if (pwmPin == LEFT_MOTOR_PWM) {
     ledcWrite(0, duty);
   } else if (pwmPin == RIGHT_MOTOR_PWM) {
@@ -81,12 +74,11 @@ void IRAM_ATTR MotorControl::rightEncoderISR() {
 
 float MotorControl::getLeftRPM() {
   uint32_t currentTime = millis();
-  float dt = (currentTime - lastRPMTime) / 1000.0;  // Convert to seconds
+  float dt = (currentTime - lastRPMTime) / 1000.0;
   if (dt <= 0) dt = RPM_TIMER_PERIOD / 1000.0;
   int32_t delta = leftEncoderCount - leftLastCount;
   leftLastCount = leftEncoderCount;
   lastRPMTime = currentTime;
-  // Calculate RPM: (delta / counts per rev) * (60 / dt)
   return (delta / (float)ENCODER_CPR) * (60.0 / dt);
 }
 
@@ -98,4 +90,12 @@ float MotorControl::getRightRPM() {
   rightLastCount = rightEncoderCount;
   lastRPMTime = currentTime;
   return (delta / (float)ENCODER_CPR) * (60.0 / dt);
+}
+
+int32_t MotorControl::getLeftEncoderCount() {
+  return leftEncoderCount;
+}
+
+int32_t MotorControl::getRightEncoderCount() {
+  return rightEncoderCount;
 }

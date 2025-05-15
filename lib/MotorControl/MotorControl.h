@@ -4,7 +4,8 @@
 #define MOTOR_CONTROL_H
 
 #include <Arduino.h>
-#include "config.h"
+// #include "config.h"
+#include "diff_drive_config.h"
 
 class MotorControl {
 public:

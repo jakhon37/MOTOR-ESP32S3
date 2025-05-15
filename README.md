@@ -1,175 +1,267 @@
-autoJetsonBot ESP32-S3 Firmware (ROS2 Control)
-This firmware runs on an ESP32-S3 microcontroller to control the autoJetsonBot differential drive robot, interfacing with ROS2 Humble via the diffdrive_arduino/DiffDriveArduino hardware interface over UART. It manages the TB6612FNG motor driver for two JGA25-370 DC motors with encoders, providing velocity control and odometry feedback. Serial monitor commands (m and e) enable standalone testing before ROS2 integration. Future plans include micro-ROS support.
-Features
+<!-- ````markdown -->
+# ESP32-S3 Custom Firmware for autoJetsonBot
 
-Motor Control: Drives two JGA25-370 motors using TB6612FNG with PWM and direction signals.
-Encoder Feedback: Tracks wheel positions and velocities via quadrature encoders.
-ROS2 Integration: Communicates with ros2_control via UART, publishing odometry and receiving velocity commands.
-Serial Testing: Supports m (motor) and e (encoder) commands for debugging.
-PlatformIO: Built with PlatformIO for efficient development.
+This repository contains the custom firmware for the ESP32‑S3 microcontroller used in the autoJetsonBot project. The firmware enables differential‑drive control and encoder reading for a two‑wheeled robot, interfacing with a ROS2 node via serial communication. It supports ASCII‑based commands for motor control (`m`) and encoder reading (`e`).
 
-Hardware Requirements (ROS2 Control)
+## Table of Contents
 
-Microcontroller: ESP32-S3 (e.g., ESP32-S3-DevKitC-1)
-Motor Driver: TB6612FNG (dual motor driver)
-Motors: 2x JGA25-370 DC 6V geared motors with quadrature encoders
-Power:
-Motors: 7.2V 4500mAh Li-ion battery (TB6612FNG VM)
-ESP32-S3: 3.3V (e.g., via USB or regulator)
+1. [Overview](#overview)  
+2. [Hardware Requirements](#hardware-requirements)  
+3. [Firmware Features](#firmware-features)  
+4. [Installation](#installation)  
+   1. [Prerequisites](#prerequisites)  
+   2. [Steps](#steps)  
+5. [Serial Communication Protocol](#serial-communication-protocol)  
+6. [Testing with Serial Monitor](#testing-with-serial-monitor)  
+7. [Integration with ROS2](#integration-with-ros2)  
+8. [Troubleshooting](#troubleshooting)  
+9. [Contributing](#contributing)  
+10. [License](#license)  
 
+---
 
-Jetson Nano B01: Runs ROS2 Humble, communicates via UART (/dev/ttyUSB0)
+## Overview
 
-Software Dependencies
+The firmware runs on an ESP32‑S3 microcontroller and controls a differential‑drive robot with two DC motors equipped with quadrature encoders. It processes serial commands to set motor speeds and report encoder counts, enabling integration with a ROS2 node for autonomous navigation. Before connecting to ROS2, the firmware can be tested using a serial monitor.
 
-PlatformIO: Build and flash tool
-ROS2: Humble Hawksbill (Jetson-side)
-Python: 3.8+ (for PlatformIO)
+---
 
-Project Structure
-├── include/
-│   ├── README                # Configuration guide
-│   └── config.h              # Pin assignments, robot parameters
-├── lib/
-│   ├── MicroROSNode/         # Placeholder for future micro-ROS integration
-│   ├── MotorControl/
-│   │   ├── MotorControl.cpp  # Motor control logic
-│   │   ├── MotorControl.h    # Motor control interface
-│   │   └── README            # Motor control notes
-├── src/
-│   └── main.cpp              # Main firmware logic
-├── .gitignore                # Ignores build artifacts
-├── README.md                 # This file
-└── platformio.ini            # PlatformIO configuration
+## Hardware Requirements
 
-Wiring (ESP32-S3 to TB6612FNG and Encoders)
+- **Microcontroller**: ESP32‑S3 (e.g., DevKitC‑1)  
+- **Motors**: Two DC motors with quadrature encoders  
+- **Motor Driver**: PWM‑compatible (e.g., L298N, TB6612FNG)  
+- **Power Supply**: 3.3 V for ESP32, 6–12 V for motors  
+- **USB‑to‑Serial Adapter**: For flashing and serial monitoring  
+- **Jetson Nano**: Running ROS2 Foxy  
+- **Serial Connection**: USB cable or UART (e.g., `/dev/ttyACM0`)  
 
-TB6612FNG Motor Driver:
-PWMA (Left PWM): GPIO18 → TB6612FNG PWMA
-AI1 (Left Dir): GPIO23 → TB6612FNG AI1
-AI2 (Left Dir): GPIO24 → TB6612FNG AI2
-PWMB (Right PWM): GPIO13 → TB6612FNG PWMB
-BI1 (Right Dir): GPIO19 → TB6612FNG BI1
-BI2 (Right Dir): GPIO26 → TB6612FNG BI2
-STBY & VCC: 3.3V (ESP32-S3) → TB6612FNG
-VM: 7.2V battery → TB6612FNG
-GND: Common ground
+---
 
+## Firmware Features
 
-JGA25-370 Motors:
-Motor Outputs: TB6612FNG A01/A02 (left), B01/B02 (right)
-Encoder Power: 3.3V (ESP32-S3), GND
-Encoder Signals:
-Left: GPIO5 (A), GPIO6 (B)
-Right: GPIO17 (A), GPIO27 (B)
+- **Motor Control**  
+  - `m <left> <right>`: Set PWM speeds or scaled velocity for left and right motors  
+- **Encoder Reading**  
+  - `e`: Return `<left_count> <right_count>`  
+- **Serial Protocol**  
+  - ASCII‑based, 115200 baud (8N1), commands end with `\r`  
+- **Robustness**  
+  - Handles invalid commands gracefully  
+- **Configurability**  
+  - Encoder CPR and motor pins defined in `diff_drive_config.h`  
 
+---
 
+## Installation
 
+### Prerequisites
 
-UART to Jetson Nano:
-TX (GPIO43) → Jetson RX
-RX (GPIO44) → Jetson TX
-GND: Common ground
+- Arduino IDE or PlatformIO with ESP32‑S3 support  
+- ESP32 Arduino Core (install via Boards Manager)  
+- Serial‑monitor tool (minicom, Arduino IDE, PlatformIO)  
+- USB‑to‑Serial drivers (e.g., CP2102)  
 
+### Steps
 
+1. **Clone Repository**  
+   ```bash
+   git clone <repository_url>
+   cd autoJetsonBot-firmware
+<!-- ```` -->
 
-Installation
+2. **Configure Firmware**
+   Edit `src/diff_drive_config.h`:
 
-Clone Repository:
-git clone https://github.com/yourusername/autoJetsonBot-firmware.git
-cd autoJetsonBot-firmware
+   ```cpp
+   #define SERIAL_BAUD_RATE 115200
+   #define ENCODER_CPR       3436
+   #define LEFT_MOTOR_PIN1   12
+   #define LEFT_MOTOR_PIN2   13
+   #define RIGHT_MOTOR_PIN1  14
+   #define RIGHT_MOTOR_PIN2  15
+   #define LEFT_ENCODER_A    16
+   #define LEFT_ENCODER_B    17
+   #define RIGHT_ENCODER_A   18
+   #define RIGHT_ENCODER_B   19
+   ```
 
+3. **Compile & Upload**
 
-Install PlatformIO:
+   * **Arduino IDE**
 
-Install PlatformIO CLI or use VS Code with the PlatformIO extension.
+     1. Open `diff_drive.ino`
+     2. Select **ESP32S3 Dev Module**, set port to `/dev/ttyACM0`
+     3. Click **Upload**
+   * **PlatformIO**
 
+     ```bash
+     pio run -t upload
+     ```
 
-Configure:
+4. **Verify Upload**
 
-Edit include/config.h (see Configuration).
-Verify platformio.ini for board = esp32-s3-devkitc-1.
+   ```bash
+   minicom -D /dev/ttyACM0 -b 115200
+   ```
 
+   Look for a boot message, e.g., `ESP32-S3 DiffDrive Firmware Initialized`.
 
-Build and Upload:
-pio run -t upload -t monitor
+---
 
+## Serial Communication Protocol
 
-Uploads to ESP32-S3 via /dev/ttyUSB0.
-Opens serial monitor (115200 baud).
+* **Baud Rate**: 115200, 8 data bits, no parity, 1 stop bit
+* **Line Ending**: `\r` (carriage return)
 
+### Commands
 
+* **Motor Control**
 
-Testing with Serial Monitor
-Test motor and encoder functionality before ROS2 integration using the serial monitor (pio device monitor, 115200 baud).
+  ```
+  m <left> <right>\r
+  ```
 
-Motor Command (m):
-Format: m <left_speed> <right_speed> (floats, -1.0 to 1.0)
-Example: m 0.5 -0.5 (left 50% forward, right 50% backward)
-Response: Set: Left=0.5, Right=-0.5
+  * `left`, `right`: Integer in –255…255
+  * Response: `OK` (or error message)
 
+* **Encoder Reading**
 
-Encoder Command (e):
-Format: e
-Example: e
-Response: Enc: Left=1234, Right=5678
+  ```
+  e\r
+  ```
 
+  * Response: `<left_count> <right_count>`
 
+---
 
-ROS2 Control Integration
+## Testing with Serial Monitor
 
-Connect: Wire ESP32-S3 UART to Jetson Nano (/dev/ttyUSB0).
-Configure ROS2:
-Use diffdrive_arduino/DiffDriveArduino in ros2_control.
-Update my_controllers.yaml:
-left_wheel_names: ['left_wheel_joint']
-right_wheel_names: ['right_wheel_joint']
-wheel_separation: 0.18
-wheel_radius: 0.035
+1. **Connect & Identify Port**
 
+   ```bash
+   ls /dev/tty*
+   ```
 
-Set UART in ros2_control.xacro:
-Device: /dev/ttyUSB0
-Baud rate: 57600
-Encoder counts: 3436
+2. **Open Serial Monitor**
 
+   * **minicom**:
 
+     ```bash
+     sudo apt-get install minicom
+     minicom -D /dev/ttyACM0 -b 115200
+     ```
 
+     Enable CR ending: `Ctrl+A`, `Z`, `U`
+   * **Arduino IDE** or **PlatformIO**: set baud to 115200, line ending to CR
 
-Run:
-Publish geometry_msgs/Twist to /cmd_vel.
-Subscribe to /odom for odometry.
+3. **Test Procedures**
 
+   * **Read Encoders**
 
-Future: Planned micro-ROS integration for direct ROS2 node functionality.
+     ```
+     e\r
+     ```
 
-Configuration
-Edit include/config.h:
-#define WHEEL_RADIUS 0.035        // Meters
-#define WHEEL_SEPARATION 0.18     // Meters
-#define ENC_COUNTS_PER_REV 3436   // Encoder ticks per revolution
-#define BAUD_RATE 57600           // ROS2 UART baud rate
-#define SERIAL_BAUD 115200        // Serial monitor baud rate
-#define PWM_LEFT_PINS {18}        // Left motor PWM
-#define DIR_LEFT_PINS {23, 24}    // Left direction pins
-#define PWM_RIGHT_PINS {13}       // Right motor PWM
-#define DIR_RIGHT_PINS {19, 26}   // Right direction pins
-#define ENC_LEFT_PINS {5, 6}      // Left encoder A, B
-#define ENC_RIGHT_PINS {17, 27}   // Right encoder A, B
+     Expect: `-4274 1471` (values change when wheels turn)
 
-Troubleshooting
+   * **Motor Control**
 
-Serial Monitor Fails: Verify 115200 baud, USB permissions (sudo chmod 666 /dev/ttyUSB0).
-Motors Not Moving: Check TB6612FNG STBY (high), VM (7.2V), and pin assignments.
-Encoder Errors: Ensure 3.3V to encoders, correct GPIO mappings.
-ROS2 No Data: Confirm UART baud (57600), ros2_control settings.
+     ```
+     m 100 100\r   # forward
+     m -100 -100\r # backward
+     m 0 0\r       # stop
+     ```
 
-Contributing
-Submit issues or pull requests to GitHub. See CONTRIBUTING.md.
-License
-MIT License. See LICENSE.
-Acknowledgments
+   * **Spin in Place**
 
-PlatformIO
-ROS2 ros2_control
+     ```
+     m 100 -100\r
+     ```
 
+   * **Dynamic Read**
+
+     ```
+     m 100 100\r
+     e\r
+     ```
+
+---
+
+## Integration with ROS2
+
+1. **Prerequisites**
+
+   * ROS2 Foxy installed on Jetson Nano
+   * `diffdrive_arduino` ROS2 package
+
+2. **Hardware Config**
+   `diffbot_hardware.yaml`:
+
+   ```yaml
+   diffdrive_arduino:
+     ros__parameters:
+       left_wheel_name:  left_wheel_joint
+       right_wheel_name: right_wheel_joint
+       loop_rate:        30.0
+       device:           /dev/ttyACM0
+       baud_rate:        115200
+       timeout:          1000
+       enc_counts_per_rev: 3436
+   ```
+
+3. **Launch & Test**
+
+   ```bash
+   cd ~/myspace/autoJetsonBot
+   source install/setup.bash
+   ros2 launch robot_body diffbot.launch.py
+   ros2 topic echo /rosout  # look for serial port info
+   ros2 topic pub /diff_cont/cmd_vel_unstamped geometry_msgs/Twist "{linear: {x: 0.5}, angular: {z: 0.0}}"
+   ros2 topic echo /odom
+   ```
+
+---
+
+## Troubleshooting
+
+* **Garbled Output**: Confirm 115200 baud in firmware and monitor
+* **No Serial Response**: Check port, power, permissions:
+
+  ```bash
+  sudo chmod 666 /dev/ttyACM0
+  ```
+* **Motors Not Moving**: Verify wiring, power; try `m 200 200\r`
+* **ROS2 Connection Error**: Ensure no other process (e.g., minicom) holds `/dev/ttyACM0`
+
+  ```bash
+  lsof /dev/ttyACM0
+  pkill -f minicom
+  ```
+
+---
+
+## Contributing
+
+1. Fork the repo
+2. Create feature branch:
+
+   ```bash
+   git checkout -b feature/xyz
+   ```
+3. Commit & push:
+
+   ```bash
+   git commit -m "Add XYZ"
+   git push origin feature/xyz
+   ```
+4. Open a pull request
+
+---
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+
+```
+```

@@ -2,8 +2,6 @@
 #ifndef PID_CONTROLLER_H
 #define PID_CONTROLLER_H
 
-#include <Arduino.h>
-
 class PIDController {
 public:
     PIDController(float kp, float ki, float kd, float out_min, float out_max);
@@ -13,6 +11,7 @@ public:
     
     // Update constants
     void setTunings(float kp, float ki, float kd);
+    void setOutputLimits(float out_min, float out_max);
     
     // Reset integral state
     void reset();

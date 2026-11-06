@@ -1,12 +1,15 @@
 # autoJetsonBot - Low Level Controller (LLC)
 
-This repository contains the firmware for the ESP32-S3 motor controller used in the **autoJetsonBot** autonomous mobile robot. It manages differential drive kinematics, PID speed control, encoder feedback, and provides real-time telemetry to the ROS 2 environment.
+This repository contains the firmware for the ESP32-S3 motor controller used in the **autoJetsonBot** autonomous mobile robot. It controls wheel speed, reads the encoders and the IMU, and provides real-time telemetry to the ROS 2 environment.
+
+> **Before flashing or driving, read [docs/FIRST_DRIVE.md](docs/FIRST_DRIVE.md).** This version hasn't run on the robot yet.
 
 ## 🚀 Features
 
--   **Deterministic Motor Control**: 50Hz control loop with PID regulation.
--   **Encoder Feedback**: Tracks dual-channel quadrature encoders for precise odometry.
--   **Aggressive Drive Logic**: Specialized kickstart PWM to overcome friction on low-voltage (5.2V - 6V) systems.
+-   **Wheel Speed Control**: A 100 Hz control task gives each wheel feed-forward PWM from the request, with a short kick to start it from rest and a closed-loop trim on top.
+-   **Encoder Feedback**: Hardware quadrature decoding on all 4 edges of both channels, with a glitch filter.
+-   **Runs Without Encoders**: The trim is only used while the encoder shows the wheel moving the requested way. If it doesn't, that wheel runs on feed-forward alone and the LED and `d` command say so.
+-   **IMU**: MPU6050 at 50 Hz over I2C.
 -   **RGB Status Indicators**: Visual feedback via onboard WS2812 LED.
 -   **Human-Readable Serial Protocol**: Simple ASCII interface compatible with ROS 2 Python bridges.
 -   **Failsafe Mode**: Automatic motor cutoff if communication with the Jetson/PC is lost (>500ms).
@@ -38,10 +41,17 @@ This repository contains the firmware for the ESP32-S3 motor controller used in 
 ### **Encoders**
 | Encoder Pin | ESP32-S3 Pin | Note |
 | :--- | :--- | :--- |
-| **Left Phase A** | **GPIO 18** | Interrupt driven |
-| **Left Phase B** | **GPIO 17** | Direction sensing |
-| **Right Phase A**| **GPIO 4** | Interrupt driven |
-| **Right Phase B**| **GPIO 5** | Direction sensing |
+| **Left Phase A** | **GPIO 18** | Hardware pulse counter |
+| **Left Phase B** | **GPIO 17** | Hardware pulse counter |
+| **Right Phase A**| **GPIO 4** | Hardware pulse counter |
+| **Right Phase B**| **GPIO 5** | Hardware pulse counter |
+
+### **IMU (MPU6050)**
+| IMU Pin | ESP32-S3 Pin | Note |
+| :--- | :--- | :--- |
+| **SDA** | **GPIO 1** | I2C data |
+| **SCL** | **GPIO 21** | I2C clock |
+| **VCC** | **3.3V** | |
 
 ### **Internal / Visuals**
 | Component | Pin | Logic |
@@ -56,26 +66,46 @@ This repository contains the firmware for the ESP32-S3 motor controller used in 
 Baud Rate: **115200**
 
 ### **Downlink (ROS -> ESP32)**
--   **Motor Command**: `m <left_vel> <right_vel>`
-    -   Example: `m 0.5 -0.5` (Spin clockwise)
--   **LED Control**: `l <state>`
-    -   `l 1` (Bright Green), `l 0` (Dim Green)
--   **Force Test**: `f <pwm>`
-    -   Example: `f 800` (Spin both wheels at 80% power for 2 seconds)
+Lines end in `\r` or `\n`. A malformed line is ignored.
+
+-   **Motor Command**: `m <left_vel> <right_vel>` in m/s
+    -   Example: `m 0.1 -0.1` (the bridge's forward: it negates the right wheel's command and count)
+    -   A request under 0.01 m/s stops that wheel. With no `m` for 500 ms, both wheels stop.
+-   **Force Test**: `f <pwm>` or `f <left_pwm> <right_pwm>`
+    -   Example: `f 300` (raw PWM, no control, stops after 2 seconds unless repeated; `f 0` or any `m` ends it)
+-   **Diagnostics**: `d` prints one line per wheel, the encoder pins' activity, and board state
+-   **Tuning**: `g` prints the tuning values, and `g <name> <value>` changes one until the next reboot
+    -   Names: `closed dead_l dead_r slope_l slope_r kick_l kick_r kick_ms kp ki trim cpr`
 
 ### **Uplink (ESP32 -> ROS)**
--   **Telemetry**: `e <left_ticks> <right_ticks>`
-    -   Example: `e 14500 14620` (Sent at 20Hz)
--   **Heartbeat**: `STATUS: RGB_READY` (Sent on boot)
+-   **Encoders**: `e <left_counts> <right_counts>` at 50 Hz
+    -   Example: `e 14500 -14620`. A wheel's count goes up on a positive request for that wheel.
+-   **IMU**: `i <ax> <ay> <az> <gx> <gy> <gz>` at 50 Hz, in m/s² and rad/s
+    -   Example: `i 0.20 0.14 -9.94 -0.01 0.01 0.01`
+-   **Boot**: `LLC_READY`, followed by ` ENCODER_ERROR` or ` IMU_ERROR` if one failed to start
+-   **Fault**: `d fault <L|R> <reason>` when a wheel drops to feed-forward alone. Reasons:
+    -   `no_counts`: driven, but the count didn't move the right way (dead wire or blocked wheel)
+    -   `wrong_dir`: the count runs against the request
+    -   `implausible`: faster than the wheel can turn (noise)
+    -   `trim_sat`: the trim stayed at its limit (bad feed-forward, or counts being lost)
+
+---
+
+## 🎛️ Setting the Gains
+
+The values to set from a measurement are in one block in `include/config.h`. `tools/wheel_test.py` measures them and prints what to enter. [docs/FIRST_DRIVE.md](docs/FIRST_DRIVE.md) has the steps.
+
+Run the control logic's tests on a PC, with no board: `pio test -e native`.
 
 ---
 
 ## 💡 Status LED Guide
 
+-   **🟡 Yellow**: Booting.
 -   **🟢 Dim Green**: Ready and Idle (Waiting for commands).
--   **🔵 Blue Pulse**: Receiving Movement Commands (Active).
--   **⚪ White**: Force/Diagnostic Mode.
--   **🔴 Red**: Booting / Initialization Error.
+-   **🔵 Blue**: Receiving Movement Commands (Active).
+-   **🟠 Orange**: A wheel is on feed-forward alone, until its next start shows the encoder working. `d` says why.
+-   **🔴 Red**: The IMU wasn't found. Motors and encoders still work, and it retries every 2 s while idle.
 
 ---
 
@@ -97,8 +127,8 @@ Baud Rate: **115200**
 3.  Check if the **VM** pin on the driver is receiving battery voltage (>5V).
 
 ### **Left encoder is 0?**
-1.  Check the wiring on **Pin 18**.
-2.  If using an older version of the firmware, ensure you aren't using Pin 13 (which conflicts with internal S3 functions).
+1.  Run `tools/wheel_test.py turns`. It reports which encoder pins change as you turn the wheel. Quadrature can't count with one of a wheel's two lines dead.
+2.  Check the wiring on **Pin 18** and **Pin 17**. The left encoder was on 13 and 14 before v1.1, and `d` also reports those two pins.
 
 ### **Serial port not found on Mac?**
 1.  Use `ls /dev/cu.usbmodem*` to find the port.

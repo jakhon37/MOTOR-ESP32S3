@@ -5,3 +5,4 @@
 .vscode/ipch
 .arch/
 flash_bundle/
+__pycache__/

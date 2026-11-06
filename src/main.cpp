@@ -8,6 +8,7 @@
 #include <Adafruit_NeoPixel.h>
 #include <Adafruit_Sensor.h>
 #include <Wire.h>
+#include <math.h>
 #include <stdarg.h>
 #include <string.h>
 #include "CommandParser.h"
@@ -17,7 +18,10 @@
 
 static const uint32_t TELEMETRY_PERIOD_MS = 20;      // 50 Hz, for `e` and for `i`
 static const uint32_t IMU_RETRY_MS = 2000;
-static const uint32_t COMMAND_ACTIVE_MS = 200;       // LED shows blue this long after a command
+static const int32_t COMMAND_ACTIVE_MS = 200;        // LED shows blue this long after a command
+static const float IMU_MAX_ACCEL = 2 * SENSORS_GRAVITY_STANDARD * 1.01f;  // the +/-2 g range
+static const float IMU_MAX_GYRO = 250 * SENSORS_DPS_TO_RADS * 1.01f;      // the +/-250 deg/s range
+static const uint8_t IMU_MAX_BAD_READS = 25;         // half a second of them means it's gone
 
 Adafruit_NeoPixel pixels(1, RGB_PIN, NEO_GRB + NEO_KHZ800);
 Adafruit_MPU6050 mpu;
@@ -28,8 +32,12 @@ static DriveController drive(tuning);
 static portMUX_TYPE commandMux = portMUX_INITIALIZER_UNLOCKED;
 static DriveCommand sharedCommand;
 
+static volatile float leftPwmNow = 0, rightPwmNow = 0;  // what the motors are getting, for `d`
+
 static bool encodersReady = false;
 static bool imuReady = false;
+static uint8_t imuBadInARow = 0;
+static uint32_t imuBadReads = 0;
 static float filteredAX = 0, filteredAY = 0, filteredAZ = 0;
 
 static void controlTask(void*) {
@@ -40,13 +48,17 @@ static void controlTask(void*) {
         MotorControl::updateEncoders();
         MotorControl::sampleEncoderPins();
 
+        const uint32_t now = millis();
         portENTER_CRITICAL(&commandMux);
+        sharedCommand.expire(now);
         const DriveCommand command = sharedCommand;
         portEXIT_CRITICAL(&commandMux);
 
         float leftPwm, rightPwm;
-        drive.update(command, millis(), MotorControl::getLeftTicks(), MotorControl::getRightTicks(), leftPwm, rightPwm);
+        drive.update(command, now, MotorControl::getLeftTicks(), MotorControl::getRightTicks(), leftPwm, rightPwm);
         MotorControl::setMotorSpeeds(leftPwm, rightPwm);
+        leftPwmNow = leftPwm;
+        rightPwmNow = rightPwm;
     }
 }
 
@@ -77,9 +89,32 @@ static void sendEncoderLine() {
     sendFormatted("e %ld %ld\r\n", (long)MotorControl::getLeftTicks(), (long)MotorControl::getRightTicks());
 }
 
-static void sendImuLine() {
-    sensors_event_t a, g, temp;
+// getEvent doesn't report a failed read. It gives garbage instead, and a failed read of the range
+// setting scales everything 8 times too large. So check the IMU answers, and that the values fit
+// the range it's set to.
+static bool readImu(sensors_event_t& a, sensors_event_t& g) {
+    Wire.beginTransmission(MPU6050_I2CADDR_DEFAULT);
+    if (Wire.endTransmission() != 0) {
+        return false;
+    }
+    sensors_event_t temp;
     mpu.getEvent(&a, &g, &temp);
+    return fabsf(a.acceleration.x) <= IMU_MAX_ACCEL && fabsf(a.acceleration.y) <= IMU_MAX_ACCEL &&
+           fabsf(a.acceleration.z) <= IMU_MAX_ACCEL && fabsf(g.gyro.x) <= IMU_MAX_GYRO &&
+           fabsf(g.gyro.y) <= IMU_MAX_GYRO && fabsf(g.gyro.z) <= IMU_MAX_GYRO;
+}
+
+static void sendImuLine() {
+    sensors_event_t a, g;
+    if (!readImu(a, g)) {
+        imuBadReads++;
+        if (++imuBadInARow >= IMU_MAX_BAD_READS) {
+            imuReady = false;  // stops the `i` lines, shows red, and retries while idle
+            imuBadInARow = 0;
+        }
+        return;
+    }
+    imuBadInARow = 0;
 
     filteredAX = (IMU_LPF_ALPHA * a.acceleration.x) + ((1.0f - IMU_LPF_ALPHA) * filteredAX);
     filteredAY = (IMU_LPF_ALPHA * a.acceleration.y) + ((1.0f - IMU_LPF_ALPHA) * filteredAY);
@@ -133,16 +168,16 @@ static bool setTuning(const char* name, float value) {
     return false;
 }
 
-static void printWheel(const char* name, const WheelController& wheel, int32_t count) {
+static void printWheel(const char* name, const WheelController& wheel, int32_t count, float pwm) {
     sendFormatted("d %s count=%ld target=%.3f speed=%.3f pwm=%.0f ff=%.0f trim=%.0f feedback=%d fault=%s faults=%lu\r\n",
-                  name, (long)count, wheel.targetMps(), wheel.measuredMps(), wheel.outputPwm(),
+                  name, (long)count, wheel.targetMps(), wheel.measuredMps(), pwm,
                   wheel.feedForwardPwm(), wheel.trimPwm(), wheel.feedbackActive() ? 1 : 0,
                   encoderFaultName(wheel.fault()), (unsigned long)wheel.faultCount());
 }
 
 static void printDiagnostics() {
-    printWheel("L", drive.left(), MotorControl::getLeftTicks());
-    printWheel("R", drive.right(), MotorControl::getRightTicks());
+    printWheel("L", drive.left(), MotorControl::getLeftTicks(), leftPwmNow);
+    printWheel("R", drive.right(), MotorControl::getRightTicks(), rightPwmNow);
 
     // pin=level/transitions. Left A, left B, right A, right B, then the two old left pins.
     char line[128];
@@ -154,7 +189,8 @@ static void printDiagnostics() {
     n += snprintf(line + n, sizeof(line) - n, "\r\n");
     Serial.write((const uint8_t*)line, n);
 
-    sendFormatted("d encoders=%d imu=%d uptime_ms=%lu\r\n", encodersReady ? 1 : 0, imuReady ? 1 : 0, (unsigned long)millis());
+    sendFormatted("d encoders=%d imu=%d imu_bad_reads=%lu uptime_ms=%lu\r\n", encodersReady ? 1 : 0, imuReady ? 1 : 0,
+                  (unsigned long)imuBadReads, (unsigned long)millis());
 }
 
 static void handleLine(const char* text) {
@@ -269,8 +305,8 @@ void loop() {
     portENTER_CRITICAL(&commandMux);
     const DriveCommand command = sharedCommand;
     portEXIT_CRITICAL(&commandMux);
-    const bool active = (command.hasVelocity && now - command.velocityMs < COMMAND_ACTIVE_MS) ||
-                        (command.hasForce && (int32_t)(now - command.forceUntilMs) < 0);
+    const bool active = (command.hasVelocity && (int32_t)(now - command.velocityMs) < COMMAND_ACTIVE_MS) ||
+                        command.forceActive(now);
 
     // beginImu() takes hundreds of ms, so only retry a missing IMU while no command is arriving.
     static uint32_t lastImuTry = 0;

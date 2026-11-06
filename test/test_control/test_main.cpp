@@ -44,6 +44,7 @@ struct Rig {
     Wheel wheel;
     float lastPwm = 0;
     float maxPwm = 0;
+    float maxTrim = 0;
 
     void run(float target, float seconds) { runWith(target, seconds, [](int32_t c) { return c; }); }
 
@@ -54,6 +55,7 @@ struct Rig {
         for (int i = 0; i < ticks; i++) {
             lastPwm = controller.update(target, encoder(wheel.count()));
             maxPwm = fmaxf(maxPwm, fabsf(lastPwm));
+            maxTrim = fmaxf(maxTrim, fabsf(controller.trimPwm()));
             wheel.step(lastPwm);
         }
     }
@@ -175,7 +177,7 @@ void test_dead_encoder_never_trims() {
     Rig rig;
     rig.runWith(0.02f, 5.0f, [](int32_t) { return 0; });
     TEST_ASSERT_EQUAL(EncoderFault::NoCounts, rig.controller.fault());
-    TEST_ASSERT_EQUAL_FLOAT(0, rig.controller.trimPwm());
+    TEST_ASSERT_EQUAL_FLOAT(0, rig.maxTrim);
     TEST_ASSERT_EQUAL_FLOAT(FF_DEADBAND_LEFT + FF_SLOPE_LEFT * 0.02f, rig.lastPwm);
     TEST_ASSERT_EQUAL_FLOAT(KICK_PWM_LEFT, rig.maxPwm);
 }
@@ -185,7 +187,7 @@ void test_dead_b_channel_counts_as_no_counts() {
     Rig rig;
     rig.runWith(0.1f, 2.0f, [](int32_t c) { return -(c & 1); });
     TEST_ASSERT_EQUAL(EncoderFault::NoCounts, rig.controller.fault());
-    TEST_ASSERT_EQUAL_FLOAT(0, rig.controller.trimPwm());
+    TEST_ASSERT_EQUAL_FLOAT(0, rig.maxTrim);
 }
 
 void test_reversed_encoder_is_caught_without_runaway() {
@@ -193,6 +195,7 @@ void test_reversed_encoder_is_caught_without_runaway() {
     rig.runWith(0.1f, 1.0f, [](int32_t c) { return -c; });
     TEST_ASSERT_EQUAL(EncoderFault::WrongDirection, rig.controller.fault());
     rig.runWith(0.1f, 2.0f, [](int32_t c) { return -c; });
+    TEST_ASSERT_EQUAL_FLOAT(0, rig.maxTrim);
     TEST_ASSERT_EQUAL_FLOAT(FF_DEADBAND_LEFT + FF_SLOPE_LEFT * 0.1f, rig.lastPwm);
     TEST_ASSERT_EQUAL_FLOAT(KICK_PWM_LEFT, rig.maxPwm);
     TEST_ASSERT_FLOAT_WITHIN(0.02f, 0.1f, rig.wheel.speed);
@@ -215,6 +218,19 @@ void test_losing_most_counts_ends_in_trim_saturated() {
     TEST_ASSERT_EQUAL(EncoderFault::TrimSaturated, rig.controller.fault());
     TEST_ASSERT_EQUAL_FLOAT(FF_DEADBAND_LEFT + FF_SLOPE_LEFT * 0.1f, rig.lastPwm);
     TEST_ASSERT_FLOAT_WITHIN(0.02f, 0.1f, rig.wheel.speed);
+}
+
+// The feed-forward is far too high for this motor, so the trim sits at its limit taking power away.
+// Dropping it would make the wheel run away from the request.
+void test_trim_at_its_limit_taking_power_away_is_kept() {
+    Rig rig;
+    rig.wheel.deadband = 100;
+    rig.wheel.slope = 400;
+    rig.wheel.staticPwm = 200;
+    rig.run(0.25f, 6.0f);
+    TEST_ASSERT_EQUAL(EncoderFault::None, rig.controller.fault());
+    TEST_ASSERT_EQUAL_FLOAT(-TRIM_MAX_PWM, rig.controller.trimPwm());
+    TEST_ASSERT_LESS_THAN_FLOAT(0.35f, rig.wheel.speed);
 }
 
 void test_noise_burst_is_implausible() {
@@ -275,6 +291,41 @@ void test_reversal_into_a_low_speed_is_not_a_fault() {
     rig.run(0.02f, 3.0f);
     TEST_ASSERT_EQUAL(EncoderFault::None, rig.controller.fault());
     TEST_ASSERT_FLOAT_WITHIN(0.005f, 0.02f, rig.meanSpeed(0.02f, 2.0f));
+}
+
+// A heavier wheel takes longer to come round. That's not a dead or reversed encoder.
+void test_slow_reversal_is_not_a_fault() {
+    for (float tau : {0.10f, 0.15f, 0.20f}) {
+        for (float request : {0.02f, 0.10f, 0.25f}) {
+            Rig rig;
+            rig.wheel.tau = tau;
+            rig.run(-0.25f, 2.0f);
+            rig.run(request, 3.0f);
+            TEST_ASSERT_EQUAL(EncoderFault::None, rig.controller.fault());
+            TEST_ASSERT_FLOAT_WITHIN(0.1f * request + 0.005f, request, rig.meanSpeed(request, 2.0f));
+        }
+    }
+}
+
+// A restart too soon after the last kick must wait for its kick, not go without one: feed-forward
+// alone can't start this wheel, and it would be stuck until the next stop.
+void test_restart_soon_after_a_kick_still_gets_one() {
+    Rig rig;
+    rig.run(0.012f, 0.03f);
+    rig.run(0, 0.2f);
+    rig.wheel.speed = 0;
+    rig.run(0.012f, 4.0f);
+    TEST_ASSERT_EQUAL(EncoderFault::None, rig.controller.fault());
+    TEST_ASSERT_FLOAT_WITHIN(0.005f, 0.012f, rig.meanSpeed(0.012f, 2.0f));
+}
+
+void test_restart_while_still_rolling_gets_no_kick() {
+    Rig rig;
+    rig.run(0.2f, 2.0f);
+    rig.run(0, 0.02f);
+    rig.maxPwm = 0;
+    rig.run(0.05f, 0.3f);
+    TEST_ASSERT_LESS_THAN_FLOAT(KICK_PWM_LEFT, rig.maxPwm);
 }
 
 void test_request_flickering_around_stop_speed_limits_kicks() {
@@ -360,6 +411,36 @@ void test_force_and_velocity_cancel_each_other() {
     TEST_ASSERT_EQUAL_FLOAT(0, r);
 }
 
+// In the firmware, expire() runs every tick. Without it, an old command would count as new again
+// when millis() comes round, days later.
+void test_expired_commands_never_come_back() {
+    ControlTuning tuning = defaultTuning();
+    DriveController drive(tuning);
+    float l, r;
+
+    DriveCommand velocity;
+    velocity.setVelocity(0.2f, 0.2f, 1000);
+    velocity.expire(1000 + CMD_TIMEOUT - 1);
+    TEST_ASSERT_TRUE(velocity.hasVelocity);
+    velocity.expire(1000 + CMD_TIMEOUT);
+    TEST_ASSERT_FALSE(velocity.hasVelocity);
+    for (uint32_t later : {0x80000000u, 0xFFFFFFFFu, 1100u}) {
+        drive.update(velocity, later, 0, 0, l, r);
+        TEST_ASSERT_EQUAL_FLOAT(0, l);
+    }
+
+    DriveCommand force;
+    force.setForce(300, 300, 1000);
+    force.expire(1000 + FORCE_TEST_MS - 1);
+    TEST_ASSERT_TRUE(force.hasForce);
+    force.expire(1000 + FORCE_TEST_MS);
+    TEST_ASSERT_FALSE(force.hasForce);
+    for (uint32_t later : {0x80000000u, 0xFFFFFFFFu, 1100u}) {
+        drive.update(force, later, 0, 0, l, r);
+        TEST_ASSERT_EQUAL_FLOAT(0, l);
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Counter wrap-around
 
@@ -421,17 +502,22 @@ int main() {
     RUN_TEST(test_reversed_encoder_is_caught_without_runaway);
     RUN_TEST(test_encoder_dying_while_driving_falls_back_to_feed_forward);
     RUN_TEST(test_losing_most_counts_ends_in_trim_saturated);
+    RUN_TEST(test_trim_at_its_limit_taking_power_away_is_kept);
     RUN_TEST(test_noise_burst_is_implausible);
     RUN_TEST(test_blocked_wheel_does_not_wind_up);
     RUN_TEST(test_fault_clears_at_the_next_start_and_is_counted);
     RUN_TEST(test_stall_at_low_speed_recovers_through_the_trim);
     RUN_TEST(test_reversal_tracks_without_a_fault);
     RUN_TEST(test_reversal_into_a_low_speed_is_not_a_fault);
+    RUN_TEST(test_slow_reversal_is_not_a_fault);
+    RUN_TEST(test_restart_soon_after_a_kick_still_gets_one);
+    RUN_TEST(test_restart_while_still_rolling_gets_no_kick);
     RUN_TEST(test_request_flickering_around_stop_speed_limits_kicks);
     RUN_TEST(test_no_drive_before_the_first_command);
     RUN_TEST(test_command_timeout_stops_and_a_new_command_restarts);
     RUN_TEST(test_force_runs_raw_pwm_then_stops_by_itself);
     RUN_TEST(test_force_and_velocity_cancel_each_other);
+    RUN_TEST(test_expired_commands_never_come_back);
     RUN_TEST(test_counter_delta_across_the_limits);
     RUN_TEST(test_parses_what_the_bridge_sends);
     RUN_TEST(test_rejects_damaged_velocity_lines);

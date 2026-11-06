@@ -45,6 +45,7 @@ python3 -m esptool --chip esp32s3 --port /dev/ttyACM0 --baud 460800 verify_flash
 
 The container's own pip can't build esptool, so the first line gets a newer one. `--target` keeps both out of the container's ROS Python. These two install lines were tried in the container on 2026-11-07, without opening the port. A new shell needs that `export` again.
 
+- [ ] `flash_id` says `8MB` or more. This build assumes 8 MB of flash, so stop here if it's less.
 - [ ] `verify_flash` ends with `verify OK (digest matched)`. The backup's size is the flash size `flash_id` printed.
 - [ ] Copy it off the robot. **Jetson**, then **PC**:
 
@@ -170,7 +171,7 @@ python3 /tmp/motor-fw/wheel_test.py direction | tee /tmp/motor-fw/direction.log
 
 - [ ] Each wheel turns **forward** when driven alone, for 2 s, then stops. If not, swap the two numbers it names in `config.h` (`*_MOTOR_IN1`, `*_MOTOR_IN2`), rebuild and reflash. Don't change the sign in the bridge.
 - [ ] It reports `Count direction OK` for each wheel. If it says to flip a `*_ENCODER_SIGN`, do that, and rebuild and reflash.
-- [ ] LED was blue while driving and green after. Orange or a `board says` line means that wheel fell back to feed-forward alone.
+- [ ] LED was blue while driving and green after. Orange or a `board says` line means that wheel fell back to feed-forward alone: see "If something goes wrong" at the end.
 
 A reflash or reset loses `g` settings. If you reflash here, put `ENCODER_CPR` in `config.h` at the same time, or send it again.
 
@@ -186,7 +187,7 @@ python3 /tmp/motor-fw/wheel_test.py timeout
 python3 /tmp/motor-fw/wheel_test.py ff | tee /tmp/motor-fw/ff.log
 ```
 
-This sweeps raw PWM on each wheel (up to about 300 above where it starts, so it spins quite fast) and prints deadband, slope and kick values.
+This sweeps raw PWM on each wheel and prints deadband, slope and kick values. It goes up to about 300 above where the wheel starts, so it spins quite fast. If the encoder shows nothing, it gives up at PWM 600 for that wheel.
 
 - [ ] Try them now: run the `send` line it prints. Or put the `config.h` lines it prints straight into step 8, and flash before going on.
 
@@ -198,17 +199,17 @@ python3 /tmp/motor-fw/wheel_test.py speed --open-loop | tee /tmp/motor-fw/speed-
 python3 /tmp/motor-fw/wheel_test.py speed | tee /tmp/motor-fw/speed-closed.log
 ```
 
-Each takes about 4.5 minutes. `speed` also runs an arc (left 0.05, right 0.20 m/s) and the stop rule (0.005 m/s).
+Each takes about 2 minutes. `speed` also runs an arc (left 0.05, right 0.20 m/s) and the stop rule (0.005 m/s).
 
 - [ ] Closed loop: `ratio` within about 0.85 to 1.15 from 0.02 to 0.25 m/s, both directions, both wheels, with `fault` `none`. Different requests give clearly different speeds.
 - [ ] The arc's two wheel speeds differ by about 4 to 1.
 - [ ] 0.005 m/s moves neither wheel.
-- [ ] Open loop: ratios may be further off but should rise evenly. This is how the robot behaves if an encoder fails.
+- [ ] Open loop: ratios may be further off but should rise evenly. A wheel whose encoder has failed behaves about like this, except that it gets no further kicks if it stalls, so it may stop at the lowest speeds.
 - [ ] No hunting: no audible pulsing at a steady request. If a wheel hunts at low speed, halve `K_P` and `K_I`.
 
 If `trim` sits near its limit (250) or `fault` says `trim_sat`, the feed-forward is far off. Redo `ff`.
 
-If encoders are dead on a wheel, count turns of the mark by eye instead, for several speeds. Forward is positive, and `--pwm` holds a raw PWM instead of a speed:
+If an encoder is dead on a wheel, `ff` and `speed` can't measure it. Count turns of the mark by eye instead, for several speeds. Forward is positive, and `--pwm` holds a raw PWM instead of a speed:
 
 ```bash
 python3 /tmp/motor-fw/wheel_test.py hold 0.10 0.10 --seconds 20
@@ -254,10 +255,10 @@ ros2 topic info /cmd_vel
 
 - [ ] `enc_ok` and `imu_ok` rise, and the last lines look right. `/serial_imu_raw` runs at about 50 Hz. `/cmd_vel` has 0 publishers.
 
-In one terminal, watch odometry:
+In one terminal, watch odometry. Use the position, not the speed: see the note below.
 
 ```bash
-ros2 topic echo /odom --field twist.twist
+ros2 topic echo /odom --field pose.pose
 ```
 
 In a second, drive forward for a few seconds, then Ctrl-C. The wheels stop within 0.5 s of that:
@@ -266,7 +267,7 @@ In a second, drive forward for a few seconds, then Ctrl-C. The wheels stop withi
 ros2 topic pub -r 20 /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.1}}"
 ```
 
-- [ ] Both wheels turn forward. `/odom` reads `linear.x` about `+0.1`, and `angular.z` about 0.
+- [ ] Both wheels turn forward. `position.x` rises by about 0.1 a second, and `orientation.z` stays about 0.
 
 Then turn left:
 
@@ -274,13 +275,42 @@ Then turn left:
 ros2 topic pub -r 20 /cmd_vel geometry_msgs/msg/Twist "{angular: {z: 0.5}}"
 ```
 
-- [ ] Left wheel back, right wheel forward. `/odom` reads `angular.z` about `+0.5`.
+- [ ] Left wheel back, right wheel forward. `orientation.z` rises steadily from where it was.
+
+**Expect spikes in `/odom`'s speed while driving, from the bridge rather than this firmware.** This comes from reading its code, because nothing has moved under it yet. When two `e` lines arrive in one 50 Hz bridge tick, `diffdrive_node.py` divides the second one's distance by a tiny time. The EKF fuses that speed, and `dock_judge` uses it to decide "stopped", so fix it in the bridge before trusting them.
 
 ## 10. On the floor
 
-Only after all of the above. Keep this first run short, in the open, with a hand near the power.
+Only after all of the above. Stop the bridge again as in step 1, keep each run short, clear about 1 m ahead, and keep a hand near the motor power. Set the values for the floor: it takes more PWM than the air, and the closed loop is slow to find it at low speed.
 
-- [ ] Low speed in a straight line, then a gentle arc, with the LED in view. The trim now adds what the floor needs, on top of the in-the-air values. Orange means a wheel fell back to feed-forward alone. To see why, stop the bridge and run `wheel_test.py send d`: `trim_sat` means the trim limit is too low or the feed-forward too far off.
+**Jetson, container:**
+
+```bash
+python3 /tmp/motor-fw/wheel_test.py hold 0.03 0.03 --seconds 4 --on-floor
+```
+
+```bash
+python3 /tmp/motor-fw/wheel_test.py hold 0.15 0.15 --seconds 3 --on-floor
+```
+
+Each prints the `trim` each wheel ended on, positive if the wheel needed more than the feed-forward gave.
+
+- [ ] Both wheels started, with `fault` `none`, and the robot went about straight. If a wheel didn't start, raise its kick: `send "g kick_l 650"` or `kick_r`.
+- [ ] For each wheel, add (trim at 0.15 - trim at 0.03) / 0.12 to `FF_SLOPE_*`, call that increase S, and add (trim at 0.03 - 0.03 x S) to `FF_DEADBAND_*`. Try them with `send "g dead_l ..." "g slope_l ..."`, repeat until the trims are small, then put them in `config.h` as in step 8.
+- [ ] If starts are too jerky at low speed, lower `KICK_MS` first, then the kick. Too low and a wheel stays stopped.
+
+## If something goes wrong
+
+| What you see | What it means |
+| :--- | :--- |
+| Orange LED, `fault=no_counts`, wheel didn't move | The kick didn't start it, or there's no motor power, or it's blocked. It gets no more kicks until the request next goes under 0.01 m/s. |
+| Orange LED, `fault=no_counts`, wheel turning | A dead encoder line. Run `turns`. The wheel keeps running on feed-forward alone. |
+| `fault=wrong_dir` | The count runs against the request. Run `direction`. |
+| `fault=implausible` | Encoder noise. Check the wires, and how they run near the motor leads. |
+| `fault=trim_sat` | The closed loop couldn't reach the speed with `TRIM_MAX_PWM` more power. The feed-forward is too low, or counts are being lost. Redo `ff`. |
+| Red LED | The IMU isn't answering. The rest keeps working, and it retries every 2 s while idle. `send d` shows `imu_bad_reads`. |
+| Board silent, no `e` lines, motors off, after a brownout or crash | It may be waiting in download mode, because the bridge and this tool hold DTR high (from the esptool source and memory of the data sheet, not tried). Stop whatever has the port open and press RESET. |
+| A wheel keeps turning after a crash | From reading the restart code: a crash doesn't reset the PWM hardware, so it holds until the firmware restarts, an estimated 1 s. That's not measured, and no crash is known. Cut the motor power if it lasts. |
 
 ## What this firmware changes from the old one
 

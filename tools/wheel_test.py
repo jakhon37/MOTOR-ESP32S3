@@ -10,7 +10,7 @@ container already has.
   ff         open-loop PWM sweep, prints the deadband, slope and kick values for config.h
   speed      requests 0.02 to 0.25 m/s on each wheel, prints the speed measured
   timeout    drives, stops sending commands, measures how long the wheels take to stop
-  hold       holds a speed or PWM for a time, to count wheel turns by eye if the encoders are dead
+  hold       holds a speed or PWM for a time, and prints what the controller did
   lines      prints the raw lines from the board (no motor commands)
   send       sends lines to the board as written and prints the replies, like "g cpr 1496" or "d"
 """
@@ -31,6 +31,10 @@ FORWARD_SIGN = {"L": 1, "R": -1}
 OLD_LEFT_PINS = ("13", "14")
 REQUESTS = (0.02, 0.03, 0.05, 0.08, 0.10, 0.15, 0.20, 0.25)
 COMMAND_PERIOD_S = 0.05  # 20 Hz, like the bridge at its slowest
+MAX_START_PWM = 600  # the sweep from rest gives up here: nothing should need more, in the air
+DEFAULT_KICK = 550  # the old firmware's 500, the only level known to work on the floor, plus a margin
+MIN_DRIVE_COUNTS = 50  # a 2 s drive at 0.1 m/s is about 1,400 counts, and one dead line only jitters
+MIN_COUNTS_PER_TURN = 100  # about 1,500 is expected, and the old one-edge count was about 350
 
 
 class Board:
@@ -67,7 +71,10 @@ class Board:
                 return
             *lines, buf = re.split(rb"[\r\n]+", buf)
             for raw in lines:
-                self.handle(raw.decode("ascii", errors="ignore"))
+                try:
+                    self.handle(raw.decode("ascii", errors="ignore"))
+                except (ValueError, IndexError):
+                    pass  # a damaged line: the next one will do
 
     def close(self):
         try:
@@ -163,8 +170,11 @@ def forward_speed(board, wheel, start, seconds, cpr):
     return moved / cpr * 2 * math.pi * WHEEL_RADIUS / seconds
 
 
-def confirm_wheels_off_the_ground():
-    print("This drives the motors. Both wheels must be off the ground, with someone at the robot.")
+def confirm_drive(on_floor=False):
+    if on_floor:
+        print("This drives the robot on the floor. Clear the way ahead, with a hand near the motor power.")
+    else:
+        print("This drives the motors. Both wheels must be off the ground, with someone at the robot.")
     if input("Type yes to go on: ").strip().lower() != "yes":
         raise SystemExit("Stopped. Nothing was driven.")
 
@@ -207,16 +217,17 @@ def hand_turns(board, wheel, name, direction, turns):
     moved = {w: board.counts[w] - start[w] for w in start}
     other = "R" if wheel == "L" else "L"
     print(f"  {name}: {moved[wheel]:+d} counts ({moved[wheel] / turns:+.1f} per turn). Other wheel: {moved[other]:+d}.")
+    if abs(moved[other]) > abs(moved[wheel]):
+        print("  The other wheel's count moved more. Are the left and right encoders swapped?")
     return moved[wheel], pin_changes(pins_before, board.pins)
 
 
 def cmd_turns(board, args):
     print("Hand test, no motor commands. Turn the wheels the way that moves the robot forward, then back.")
-    results = {}
+    sizes = {}
     for wheel, name, pin_a, pin_b in (("L", "left", "18", "17"), ("R", "right", "4", "5")):
         forward, pins = hand_turns(board, wheel, name, "forward", args.turns)
         backward, pins_back = hand_turns(board, wheel, name, "backward", args.turns)
-        results[wheel] = (forward, backward)
         changes = {p: pins[p] + pins_back[p] for p in pins}
 
         moved_a, moved_b = changes[pin_a], changes[pin_b]
@@ -228,28 +239,37 @@ def cmd_turns(board, args):
             dead = pin_a if not moved_a else pin_b
             print(f"  GPIO {dead} never changed: check that wire. Quadrature can't count with one line dead.")
             continue
+        if min(abs(forward), abs(backward)) < MIN_COUNTS_PER_TURN * args.turns:
+            print("  Both pins changed, but the count hardly moved. Check that A and B aren't the same signal"
+                  " or the same wire, then repeat.")
+            continue
 
-        size = (abs(forward) + abs(backward)) / 2 / args.turns
         sign = FORWARD_SIGN[wheel]
         if forward * sign > 0 > backward * sign:
-            print(f"  Direction OK. About {size:.0f} counts per turn.")
+            print("  Direction OK.")
         elif forward * sign < 0 < backward * sign:
             define = "LEFT_ENCODER_SIGN" if wheel == "L" else "RIGHT_ENCODER_SIGN"
-            print(f"  Counts run the wrong way. Flip {define} in config.h. About {size:.0f} counts per turn.")
+            print(f"  Counts run the wrong way. Flip {define} in config.h.")
         else:
             print("  The count did not reverse when the wheel did. Check the A and B wires, then repeat.")
+            continue
+        sizes[wheel] = [abs(forward) / args.turns, abs(backward) / args.turns]
 
-    sizes = [abs(c) / args.turns for pair in results.values() for c in pair]
-    if sizes and all(sizes):
-        spread = (max(sizes) - min(sizes)) / statistics.mean(sizes) * 100
-        print(f"\nCounts per turn: {[round(s) for s in sizes]}, spread {spread:.0f}%.")
-        print(f"Set ENCODER_CPR in include/config.h and encoder_cpr in the bridge to {statistics.mean(sizes):.0f}.")
-        if spread > 5:
-            print("That spread is high for two wheels of the same type: recount with marks, or check the wires.")
+    if not sizes:
+        print("\nNo usable count from either wheel, so no encoder_cpr yet. Fix what's listed above and repeat.")
+        return
+    all_sizes = [size for pair in sizes.values() for size in pair]
+    spread = (max(all_sizes) - min(all_sizes)) / statistics.mean(all_sizes) * 100
+    print(f"\nCounts per turn: {[round(s) for s in all_sizes]}, spread {spread:.0f}%.")
+    print(f"Set ENCODER_CPR in include/config.h and encoder_cpr in the bridge to {statistics.mean(all_sizes):.0f}.")
+    if len(sizes) == 1:
+        print("That's from one wheel only. Repeat when the other works: they should match.")
+    if spread > 5:
+        print("That spread is high for two wheels of the same type: recount with marks, or check the wires.")
 
 
 def cmd_direction(board, args):
-    confirm_wheels_off_the_ground()
+    confirm_drive()
     for wheel, name in (("L", "left"), ("R", "right")):
         input(f"Watch the {name} wheel. Press Enter to drive it for 2 s.")
         start = board.counts[wheel]
@@ -261,12 +281,18 @@ def cmd_direction(board, args):
         moved = board.counts[wheel] - start
         print(f"  Sent 'm {left:.3f} {right:.3f}'. Count changed by {moved:+d}. Board: "
               f"pwm={info.get('pwm')} feedback={info.get('feedback')} fault={info.get('fault')}")
-        forward = input(f"  Did the {name} wheel turn the way that moves the robot forward? [y/n] ").strip().lower() == "y"
+        answer = ""
+        while answer not in ("f", "b", "n"):
+            answer = input(f"  Which way did the {name} wheel turn: forward, backward, or not at all? [f/b/n] ").strip().lower()[:1]
+        if answer == "n":
+            print("  It didn't turn, so this says nothing about direction. Check the motor power and the driver's"
+                  " wiring. If those are fine, raise the kick.")
+            continue
+        forward = answer == "f"
         if not forward:
-            in1, in2 = (f"{name.upper()}_MOTOR_IN1", f"{name.upper()}_MOTOR_IN2")
-            print(f"  Wrong way. Swap the numbers of {in1} and {in2} in config.h.")
-        if moved == 0:
-            print("  The count did not move. Run 'turns' to find the dead wire. This wheel runs on feed-forward alone.")
+            print(f"  Wrong way. Swap the numbers of {name.upper()}_MOTOR_IN1 and {name.upper()}_MOTOR_IN2 in config.h.")
+        if abs(moved) < MIN_DRIVE_COUNTS:
+            print("  The count hardly moved. Run 'turns' to find the dead wire. This wheel runs on feed-forward alone.")
         elif (moved * FORWARD_SIGN[wheel] > 0) != forward:
             define = "LEFT_ENCODER_SIGN" if wheel == "L" else "RIGHT_ENCODER_SIGN"
             print(f"  The count ran against the wheel. Flip {define} in config.h.")
@@ -277,7 +303,7 @@ def cmd_direction(board, args):
 def sweep_pwm(board, wheel, cpr):
     """Measures speed against PWM, returns (start_pwm, table). Forward positive."""
     start_pwm = None
-    for pwm in range(100, 1000, 25):  # going up from rest: the first PWM that starts the wheel
+    for pwm in range(100, MAX_START_PWM + 1, 25):  # going up from rest: the first PWM that starts the wheel
         rest(board, 0.4)
         start = board.counts[wheel]
         drive_for(0.6, lambda: board.force(*wheel_command(wheel, pwm)))
@@ -315,7 +341,7 @@ def fit_line(points):
 
 
 def cmd_ff(board, args):
-    confirm_wheels_off_the_ground()
+    confirm_drive()
     cpr = board.counts_per_turn()
     print(f"Speeds use the {cpr:.0f} counts per turn on the board, so run 'turns' and set that first.")
     lines = []
@@ -323,14 +349,14 @@ def cmd_ff(board, args):
         print(f"{name} wheel:")
         start_pwm, table = sweep_pwm(board, wheel, cpr)
         if start_pwm is None:
-            print("  The encoder saw no movement up to PWM 975. Fix that first (run 'turns').")
+            print(f"  The encoder saw no movement up to PWM {MAX_START_PWM}. Find out why with 'turns' and 'direction'.")
             continue
         running = [(speed, pwm) for pwm, speed in table if 0.01 < speed <= 0.40]
         if len(running) < 3:
             print("  Too few running points to fit. Are the counts going the right way? Run 'direction'.")
             continue
         deadband, slope = fit_line(running)
-        kick = min(start_pwm + 50, 1023)
+        kick = min(max(start_pwm + 100, DEFAULT_KICK), 1023)  # starting on the floor takes more than this
         print(f"  deadband {deadband:.0f}, slope {slope:.0f} PWM per m/s, starts from rest at PWM {start_pwm}")
         lines.append((name.upper(), name[0], round(deadband), round(slope), kick))
     if lines:
@@ -341,11 +367,11 @@ def cmd_ff(board, args):
         settings = " ".join(f'"g dead_{letter} {deadband}" "g slope_{letter} {slope}" "g kick_{letter} {kick}"'
                             for _, letter, deadband, slope, kick in lines)
         print(f"python3 {sys.argv[0]} send {settings}")
-        print("\nThese are for wheels in the air. On the floor the wheels need more, which the closed loop adds.")
+        print("\nThese are for wheels in the air. The floor needs more: see the floor step in docs/FIRST_DRIVE.md.")
 
 
 def cmd_speed(board, args):
-    confirm_wheels_off_the_ground()
+    confirm_drive()
     cpr = board.counts_per_turn()
     closed_before = board.tuning.get("closed", "1")
     board.send(f"g closed {0 if args.open_loop else 1}")
@@ -385,24 +411,35 @@ def cmd_speed(board, args):
 
 
 def cmd_hold(board, args):
-    confirm_wheels_off_the_ground()
+    confirm_drive(args.on_floor)
     unit = "PWM" if args.pwm else "m/s"
-    print(f"Holding left {args.left} and right {args.right} {unit}, forward positive, for {args.seconds:.0f} s."
-          " Count the turns of a marked wheel: speed = turns x 0.2136 m / seconds.")
+    print(f"Holding left {args.left} and right {args.right} {unit}, forward positive, for {args.seconds:.0f} s.")
     if args.pwm:
         send = lambda: board.force(args.left, -args.right)
     else:
         send = lambda: board.velocity(args.left, -args.right)
     start = dict(board.counts)
     drive_for(args.seconds, send)
+    send()
+    board.diagnostics()
+    state = dict(board.diag)
     rest(board)
     print(f"Count changes: L {board.counts['L'] - start['L']:+d}  R {board.counts['R'] - start['R']:+d}")
+    if not args.pwm:
+        print("At the end, with forward positive, so a positive trim means the wheel needed more than the feed-forward:")
+        for wheel in ("L", "R"):
+            info = state.get(wheel, {})
+            forward = {k: FORWARD_SIGN[wheel] * float(info.get(k, 0)) for k in ("speed", "pwm", "ff", "trim")}
+            print(f"  {wheel}: speed={forward['speed']:+.3f} pwm={forward['pwm']:.0f} ff={forward['ff']:.0f} "
+                  f"trim={forward['trim']:+.0f} fault={info.get('fault')}")
 
 
 def cmd_timeout(board, args):
-    confirm_wheels_off_the_ground()
+    confirm_drive()
+    start = dict(board.counts)
     drive_for(1.5, lambda: board.velocity(0.15, -0.15))
     last_command = time.monotonic()
+    encoders_moved = any(abs(board.counts[w] - start[w]) >= MIN_DRIVE_COUNTS for w in start)
     counts = dict(board.counts)
     last_move = last_command
     while time.monotonic() - last_move < 1.0 and time.monotonic() - last_command < 5.0:
@@ -410,8 +447,12 @@ def cmd_timeout(board, args):
         if board.counts != counts:
             counts = dict(board.counts)
             last_move = time.monotonic()
-    print(f"Last count change {last_move - last_command:.2f} s after the last command.")
-    print("Expect the 0.5 s timeout plus a little coasting. Over about 1 s is a failure.")
+    if encoders_moved:
+        print(f"Last count change {last_move - last_command:.2f} s after the last command.")
+        print("Expect the 0.5 s timeout plus a little coasting. Over about 1 s is a failure.")
+    else:
+        print("The encoders showed no movement, so this can't time the stop. Watch the wheels instead: run it"
+              " again, and they should stop about 2 s after you start it, half a second after the commands end.")
     board.diagnostics()
     print(f"Board: L pwm={board.diag['L'].get('pwm')} R pwm={board.diag['R'].get('pwm')} (both must be 0)")
 
@@ -458,6 +499,7 @@ def main():
     hold.add_argument("right", type=float, help="forward positive, m/s (or PWM with --pwm)")
     hold.add_argument("--seconds", type=float, default=20)
     hold.add_argument("--pwm", action="store_true", help="open-loop PWM instead of a speed")
+    hold.add_argument("--on-floor", action="store_true", help="the robot is on the floor, not on its stand")
     lines = sub.add_parser("lines")
     lines.add_argument("--seconds", type=float, default=1)
     lines.add_argument("--reset", action="store_true", help="reset the board first, to see its boot line")

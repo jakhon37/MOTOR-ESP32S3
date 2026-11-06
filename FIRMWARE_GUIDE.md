@@ -40,7 +40,7 @@ The ESP32 communicates with the Jetson Nano via a lightweight ASCII protocol.
 
 ### Downlink (Command)
 **Format:** `m <left_v> <right_v>\r`
-*   **Example:** `m 0.5 -0.5\r` (Spin in place).
+*   **Example:** `m 0.1 -0.1\r` (Straight ahead: the bridge negates the right wheel's command and count).
 *   **Safety:** If no `m` command is received for **500ms**, the robot will trigger an Emergency Stop (E-Stop).
 
 ### Uplink (Telemetry)

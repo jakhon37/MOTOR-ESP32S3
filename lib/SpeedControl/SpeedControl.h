@@ -32,7 +32,7 @@ enum class EncoderFault : uint8_t {
     NoCounts,        // driven, but the count did not move the right way
     WrongDirection,  // the count moves against the request: LEFT/RIGHT_ENCODER_SIGN or the motor wires
     Implausible,     // faster than the wheel can turn: noise on the encoder lines
-    TrimSaturated,   // the trim stayed at its limit: bad feed-forward, a blocked wheel or lost counts
+    TrimSaturated,   // the trim stayed at its limit adding power: bad feed-forward or lost counts
 };
 
 const char* encoderFaultName(EncoderFault fault);
@@ -52,7 +52,6 @@ public:
     float measuredMps() const { return m_measured; }
     float feedForwardPwm() const { return m_feedForward; }
     float trimPwm() const { return m_trim; }
-    float outputPwm() const { return m_output; }
     bool feedbackActive() const;
     EncoderFault fault() const { return m_fault; }  // kept after a stop, until the next start
     uint32_t faultCount() const { return m_faultCount; }
@@ -78,17 +77,18 @@ private:
     float m_measured = 0;
     float m_feedForward = 0;
     float m_trim = 0;
-    float m_output = 0;
 
     bool m_moving = false;
     int m_dir = 0;
     uint32_t m_motionMs = 0;
     uint32_t m_sinceKickMs = 0;
+    bool m_kickWanted = false;
     uint32_t m_kickLeftMs = 0;
 
     bool m_proven = false;
     int32_t m_proofStart = 0;
     uint32_t m_proofMs = 0;
+    uint32_t m_settleMs = 0;
     uint32_t m_stillMs = 0;
     uint32_t m_saturatedMs = 0;
     EncoderFault m_fault = EncoderFault::None;
@@ -109,6 +109,11 @@ struct DriveCommand {
 
     void setVelocity(float leftMps, float rightMps, uint32_t nowMs);  // ends a force test
     void setForce(int leftPwm, int rightPwm, uint32_t nowMs);         // open-loop test, zero ends it
+    bool velocityFresh(uint32_t nowMs) const;
+    bool forceActive(uint32_t nowMs) const;
+
+    // Forgets expired commands. Run it every tick, or millis() wrapping round brings them back.
+    void expire(uint32_t nowMs);
 };
 
 class DriveController {

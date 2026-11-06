@@ -82,12 +82,13 @@ Lines end in `\r` or `\n`. A malformed line is ignored.
     -   Example: `e 14500 -14620`. A wheel's count goes up on a positive request for that wheel.
 -   **IMU**: `i <ax> <ay> <az> <gx> <gy> <gz>` at 50 Hz, in m/s² and rad/s
     -   Example: `i 0.20 0.14 -9.94 -0.01 0.01 0.01`
+    -   A failed read sends no line. After half a second of those, `i` lines stop until the IMU is found again.
 -   **Boot**: `LLC_READY`, followed by ` ENCODER_ERROR` or ` IMU_ERROR` if one failed to start
 -   **Fault**: `d fault <L|R> <reason>` when a wheel drops to feed-forward alone. Reasons:
-    -   `no_counts`: driven, but the count didn't move the right way (dead wire or blocked wheel)
+    -   `no_counts`: driven, but the count didn't move the right way (dead wire, blocked wheel, or a kick too low to start it)
     -   `wrong_dir`: the count runs against the request
     -   `implausible`: faster than the wheel can turn (noise)
-    -   `trim_sat`: the trim stayed at its limit (bad feed-forward, or counts being lost)
+    -   `trim_sat`: the trim stayed at its limit adding power (bad feed-forward, or counts being lost)
 
 ---
 

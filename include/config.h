@@ -60,7 +60,7 @@
 // =============================================================================================
 // SET THESE FROM A MEASUREMENT. tools/wheel_test.py prints them, see docs/FIRST_DRIVE.md.
 // The values below are estimates: none of them has been measured on the robot.
-// All of them except KICK_MS can also be tried without flashing, with the `g` command.
+// All of them can also be tried without flashing, with the `g` command.
 // =============================================================================================
 
 // Counts per wheel turn, counting all 4 edges. Estimate: 4 x the 344 to 387 per turn counted on
@@ -74,8 +74,10 @@
 #define FF_SLOPE_RIGHT    1100
 
 // Short push when a wheel starts from rest, because starting takes more PWM than keeping going.
-#define KICK_PWM_LEFT     450     // lowest PWM that starts the wheel, plus a margin
-#define KICK_PWM_RIGHT    450
+// It must start the wheel on the floor. A wheel that a kick doesn't move stays stopped until its
+// next start. The old firmware's 500 is the only level known to work, so this is that plus a margin.
+#define KICK_PWM_LEFT     550
+#define KICK_PWM_RIGHT    550
 #define KICK_MS           40
 
 // Closed loop on top of feed-forward: trim = K_P * error + K_I * integral(error), error in m/s.
@@ -92,11 +94,12 @@
 #define ENC_PROOF_COUNTS       6      // counts the right way before the encoder is believed
 #define ENC_PROOF_TIMEOUT_MS   300    // no_counts: PWM applied, but no such counts in this time
 #define ENC_WRONG_DIR_COUNTS   4      // wrong_dir: counts the wrong way in one window...
-#define ENC_WRONG_DIR_SETTLE_MS 300   // ...this long after a start, so a reversal can slow down
+#define ENC_WRONG_DIR_SETTLE_MS 300   // ...this long after a start from rest...
+#define ENC_REVERSAL_SETTLE_MS 800    // ...or after a start while still rolling the other way
 #define ENC_STILL_COUNTS       2      // fewer counts than this in one window means not moving
 #define ENC_STILL_MS           300    // not moving for this long: kick again and re-check
 #define ENC_MAX_MPS            1.5f   // implausible: faster than these wheels can turn
-#define TRIM_SATURATED_MS      1500   // trim_sat: trim at its limit for this long
+#define TRIM_SATURATED_MS      1500   // trim_sat: trim at its limit, adding power, for this long
 #define KICK_MIN_INTERVAL_MS   250    // a request flickering around the stop limit kicks no faster
 
 // -----------------------------

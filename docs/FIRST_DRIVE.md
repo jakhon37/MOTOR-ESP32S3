@@ -235,7 +235,6 @@ The old firmware counted one edge of channel A. This one counts all 4 edges of A
 - [ ] In `autoJetsonBot`, set it in both places, and commit:
   - `src/jetson_bot_bringup/launch/main.launch.py`, the `'encoder_cpr': 3436` in the bridge's parameters
   - `src/jetson_bot_diffdrive/jetson_bot_diffdrive/diffdrive_node.py`, the default in `declare_parameter('encoder_cpr', 3436)`
-- [ ] `GEMINI.md` also says 3436, for documentation only.
 - [ ] Check nothing else publishes `/cmd_vel` before the bridge starts, because from now on it can drive the wheels. Test runs in the `jbl_baseline` container use their own domain, but `test_safety_gate_launch.py` keeps one that's already set.
 
 **Jetson**, restart the bridge. By hand, as it was, with your number:

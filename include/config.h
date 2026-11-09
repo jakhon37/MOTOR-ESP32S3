@@ -27,9 +27,10 @@
 #define OLD_LEFT_ENCODER_B 17
 
 // A positive `m` request on a wheel must make its count go up. Raw counts go up when A rises
-// while B is low. These signs match the old interrupts, but no motor has run on them yet.
+// while B is low. Set from the first drive on 2026-11-09: with the robot's wiring the left count
+// ran backwards on a forward request, and the right one was right.
 // Flip one if the wheel test shows wrong_dir: the bridge expects this rule on both wheels.
-#define LEFT_ENCODER_SIGN   1
+#define LEFT_ENCODER_SIGN   (-1)
 #define RIGHT_ENCODER_SIGN  (-1)
 
 // Edges shorter than this are ignored, in 80 MHz clock cycles (hardware limit 1023).

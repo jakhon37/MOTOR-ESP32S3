@@ -60,8 +60,8 @@
 
 // =============================================================================================
 // SET THESE FROM A MEASUREMENT. tools/wheel_test.py prints them, see docs/FIRST_DRIVE.md.
-// ENCODER_CPR and the feed-forward values were measured on 2026-11-09/10 with the wheels in the
-// air. The kick and the closed-loop gains are still estimates.
+// ENCODER_CPR was measured on 2026-11-10 by hand, and the feed-forward values on the floor the
+// same day. The kick has started both wheels on the floor; the closed-loop gains are estimates.
 // All of them can also be tried without flashing, with the `g` command.
 // =============================================================================================
 
@@ -70,17 +70,19 @@
 // The bridge's encoder_cpr must hold the same number.
 #define ENCODER_CPR       1497
 
-// PWM (0-1023) for a requested speed = DEADBAND + SLOPE * speed. Measured with the wheels in the
-// air on 2026-11-10 (wheel_test.py ff): closed-loop speeds then came within 1 to 2% of requests
-// from 0.02 to 0.25 m/s, with trims under 15. The floor needs more: see docs/FIRST_DRIVE.md.
-#define FF_DEADBAND_LEFT  51      // PWM at which the turning wheel stops
-#define FF_DEADBAND_RIGHT 42
-#define FF_SLOPE_LEFT     1743    // extra PWM per m/s
-#define FF_SLOPE_RIGHT    1732
+// PWM (0-1023) for a requested speed = DEADBAND + SLOPE * speed. Set for the floor on 2026-11-10
+// from wheel_test.py hold at 0.03 and 0.15 m/s (docs/FIRST_DRIVE.md step 10): with these, the
+// trims there stayed within 11. In the air the wheels need less: deadband 51 and 42, slope 1,743
+// and 1,732, measured with wheel_test.py ff.
+#define FF_DEADBAND_LEFT  58      // PWM at which the turning wheel stops
+#define FF_DEADBAND_RIGHT 88
+#define FF_SLOPE_LEFT     1893    // extra PWM per m/s
+#define FF_SLOPE_RIGHT    1740
 
 // Short push when a wheel starts from rest, because starting takes more PWM than keeping going.
 // It must start the wheel on the floor. A wheel that a kick doesn't move stays stopped until its
-// next start. The old firmware's 500 is the only level known to work, so this is that plus a margin.
+// next start. This is the old firmware's 500 plus a margin, and on 2026-11-10 it started both
+// wheels in five floor runs.
 #define KICK_PWM_LEFT     550
 #define KICK_PWM_RIGHT    550
 #define KICK_MS           40

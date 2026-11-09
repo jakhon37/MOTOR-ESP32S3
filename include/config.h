@@ -64,9 +64,10 @@
 // All of them can also be tried without flashing, with the `g` command.
 // =============================================================================================
 
-// Counts per wheel turn, counting all 4 edges. Estimate: 4 x the 344 to 387 per turn counted on
-// one edge in the 2026-11-06 hand test. The bridge's encoder_cpr must hold the same number.
-#define ENCODER_CPR       1460
+// Counts per wheel turn, counting all 4 edges. Measured in the 2026-11-10 hand test: 1,497, 1,496,
+// 1,500 and 1,496 for the two wheels both ways (4 x 11 pulses x a 34:1 gearbox).
+// The bridge's encoder_cpr must hold the same number.
+#define ENCODER_CPR       1497
 
 // PWM (0-1023) for a requested speed = DEADBAND + SLOPE * speed.
 #define FF_DEADBAND_LEFT  200     // PWM at which the turning wheel stops

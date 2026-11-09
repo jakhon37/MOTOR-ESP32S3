@@ -60,7 +60,8 @@
 
 // =============================================================================================
 // SET THESE FROM A MEASUREMENT. tools/wheel_test.py prints them, see docs/FIRST_DRIVE.md.
-// The values below are estimates: none of them has been measured on the robot.
+// ENCODER_CPR and the feed-forward values were measured on 2026-11-09/10 with the wheels in the
+// air. The kick and the closed-loop gains are still estimates.
 // All of them can also be tried without flashing, with the `g` command.
 // =============================================================================================
 
@@ -69,11 +70,13 @@
 // The bridge's encoder_cpr must hold the same number.
 #define ENCODER_CPR       1497
 
-// PWM (0-1023) for a requested speed = DEADBAND + SLOPE * speed.
-#define FF_DEADBAND_LEFT  200     // PWM at which the turning wheel stops
-#define FF_DEADBAND_RIGHT 200
-#define FF_SLOPE_LEFT     1100    // extra PWM per m/s
-#define FF_SLOPE_RIGHT    1100
+// PWM (0-1023) for a requested speed = DEADBAND + SLOPE * speed. Measured with the wheels in the
+// air on 2026-11-10 (wheel_test.py ff): closed-loop speeds then came within 1 to 2% of requests
+// from 0.02 to 0.25 m/s, with trims under 15. The floor needs more: see docs/FIRST_DRIVE.md.
+#define FF_DEADBAND_LEFT  51      // PWM at which the turning wheel stops
+#define FF_DEADBAND_RIGHT 42
+#define FF_SLOPE_LEFT     1743    // extra PWM per m/s
+#define FF_SLOPE_RIGHT    1732
 
 // Short push when a wheel starts from rest, because starting takes more PWM than keeping going.
 // It must start the wheel on the floor. A wheel that a kick doesn't move stays stopped until its

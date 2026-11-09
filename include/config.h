@@ -44,6 +44,14 @@
 #define IMU_SCL           21
 #define IMU_LPF_ALPHA     0.8f    // accelerometer filter (0.8 = sharp, 0.2 = smooth)
 
+// Gyro offsets at rest, in rad/s and the IMU's own frame (it's mounted upside down), subtracted
+// before the `i` line is sent. Measured on 2026-11-10 over 60 s on the floor, 3,000 samples, with
+// the same means in both halves. Uncorrected, Z alone turned the heading 0.7 deg/s. They drift
+// with temperature, so remeasure if the robot's heading creeps at rest.
+#define GYRO_BIAS_X       -0.0092f
+#define GYRO_BIAS_Y       -0.0569f
+#define GYRO_BIAS_Z       -0.0122f
+
 // -----------------------------
 // Robot Physical Specs
 // -----------------------------

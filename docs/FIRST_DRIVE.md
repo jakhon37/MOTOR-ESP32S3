@@ -139,7 +139,7 @@ What it might say instead:
 | Message | What to do |
 | :--- | :--- |
 | `GPIO n never changed` | Dead line. With the power off, check that wire at both ends. Quadrature can't count without it, so that wheel's count stays near 0. Then measure the line while turning the wheel slowly: it should swing between about 0 V and at most 3.3 V. If it goes to 5 V, stop and fix that first, because the ESP32-S3's inputs aren't rated for it. |
-| `Activity on old left pins` | A left encoder wire is still on GPIO 13 or 14. Move it to 18 or 17, or change `LEFT_ENCODER_A/B` in `config.h`. |
+| `Activity on old left pins` | A left encoder wire is on GPIO 13 or 17. Move it to 18 (A) or 14 (B), or change `LEFT_ENCODER_A/B` in `config.h`. |
 | `Counts run the wrong way` | Flip the named `*_ENCODER_SIGN` in `config.h`, and rebuild. |
 | `The count did not reverse` | A and B aren't both working as a pair. Check the wires, then repeat. |
 

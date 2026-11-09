@@ -17,14 +17,14 @@
 // Encoder Pin Definitions
 // -----------------------------
 #define LEFT_ENCODER_A    18
-#define LEFT_ENCODER_B    17
+#define LEFT_ENCODER_B    14  // the robot's green wire: the wiring diagram has it here, not on v1.1's 17
 #define RIGHT_ENCODER_A   4
 #define RIGHT_ENCODER_B   5
 
-// The left encoder was on these two pins before v1.1. Nothing uses them now. The `d` command
-// reports them so a wire that was never moved shows up.
+// Spare left pins: 13 was the left A before v1.1, and 17 is the B pin v1.1 planned. Nothing uses
+// them now. The `d` command reports them so a wire on either shows up.
 #define OLD_LEFT_ENCODER_A 13
-#define OLD_LEFT_ENCODER_B 14
+#define OLD_LEFT_ENCODER_B 17
 
 // A positive `m` request on a wheel must make its count go up. Raw counts go up when A rises
 // while B is low. These signs match the old interrupts, but no motor has run on them yet.

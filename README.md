@@ -42,7 +42,7 @@ This repository contains the firmware for the ESP32-S3 motor controller used in 
 | Encoder Pin | ESP32-S3 Pin | Note |
 | :--- | :--- | :--- |
 | **Left Phase A** | **GPIO 18** | Hardware pulse counter |
-| **Left Phase B** | **GPIO 17** | Hardware pulse counter |
+| **Left Phase B** | **GPIO 14** | Hardware pulse counter |
 | **Right Phase A**| **GPIO 4** | Hardware pulse counter |
 | **Right Phase B**| **GPIO 5** | Hardware pulse counter |
 
@@ -129,7 +129,7 @@ Run the control logic's tests on a PC, with no board: `pio test -e native`.
 
 ### **Left encoder is 0?**
 1.  Run `tools/wheel_test.py turns`. It reports which encoder pins change as you turn the wheel. Quadrature can't count with one of a wheel's two lines dead.
-2.  Check the wiring on **Pin 18** and **Pin 17**. The left encoder was on 13 and 14 before v1.1, and `d` also reports those two pins.
+2.  Check the wiring on **Pin 18** and **Pin 14**. `d` also reports 13 and 17, the left pins of earlier versions, so a wire on either shows up.
 
 ### **Serial port not found on Mac?**
 1.  Use `ls /dev/cu.usbmodem*` to find the port.

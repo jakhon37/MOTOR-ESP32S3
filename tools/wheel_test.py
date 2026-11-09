@@ -28,7 +28,7 @@ WHEEL_RADIUS = 0.034
 # A wheel moving the robot forward gets a positive request on the left and a negative one on the
 # right, because the bridge negates the right wheel's command and count. Its count follows.
 FORWARD_SIGN = {"L": 1, "R": -1}
-OLD_LEFT_PINS = ("13", "14")
+OLD_LEFT_PINS = ("13", "17")
 REQUESTS = (0.02, 0.03, 0.05, 0.08, 0.10, 0.15, 0.20, 0.25)
 COMMAND_PERIOD_S = 0.05  # 20 Hz, like the bridge at its slowest
 MAX_START_PWM = 600  # the sweep from rest gives up here: nothing should need more, in the air
@@ -225,7 +225,7 @@ def hand_turns(board, wheel, name, direction, turns):
 def cmd_turns(board, args):
     print("Hand test, no motor commands. Turn the wheels the way that moves the robot forward, then back.")
     sizes = {}
-    for wheel, name, pin_a, pin_b in (("L", "left", "18", "17"), ("R", "right", "4", "5")):
+    for wheel, name, pin_a, pin_b in (("L", "left", "18", "14"), ("R", "right", "4", "5")):
         forward, pins = hand_turns(board, wheel, name, "forward", args.turns)
         backward, pins_back = hand_turns(board, wheel, name, "backward", args.turns)
         changes = {p: pins[p] + pins_back[p] for p in pins}
@@ -234,7 +234,7 @@ def cmd_turns(board, args):
         print(f"  Pin changes seen: A (GPIO {pin_a}) {moved_a}, B (GPIO {pin_b}) {moved_b}")
         if wheel == "L" and any(changes[p] for p in OLD_LEFT_PINS):
             print(f"  Activity on old left pins: {[(p, changes[p]) for p in OLD_LEFT_PINS]}."
-                  " A left encoder wire is on GPIO 13 or 14, not on 18 or 17.")
+                  " A left encoder wire is on GPIO 13 or 17, not on 18 or 14.")
         if not moved_a or not moved_b:
             dead = pin_a if not moved_a else pin_b
             print(f"  GPIO {dead} never changed: check that wire. Quadrature can't count with one line dead.")

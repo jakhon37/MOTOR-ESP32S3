@@ -120,7 +120,9 @@ static void sendImuLine() {
     filteredAY = (IMU_LPF_ALPHA * a.acceleration.y) + ((1.0f - IMU_LPF_ALPHA) * filteredAY);
     filteredAZ = (IMU_LPF_ALPHA * a.acceleration.z) + ((1.0f - IMU_LPF_ALPHA) * filteredAZ);
 
-    sendFormatted("i %.2f %.2f %.2f %.2f %.2f %.2f\r\n",
+    // 4 decimals for the gyro: at rest its bias is about 0.02 rad/s and its noise about 0.0004, so
+    // 2 decimals hid both. The sensor's own step at +/-250 deg/s is 0.00013 rad/s.
+    sendFormatted("i %.3f %.3f %.3f %.4f %.4f %.4f\r\n",
                   filteredAX, filteredAY, filteredAZ, g.gyro.x, g.gyro.y, g.gyro.z);
 }
 

@@ -10,6 +10,7 @@
 
 static const float DT = CONTROL_PERIOD_MS / 1000.0f;
 static const float TWO_PI_R = 2.0f * 3.14159265f * WHEEL_RADIUS;
+static const float COUNTS_PER_TURN = 1497;  // the robot's encoders, but fixed here like the tuning below
 
 // A geared motor: first-order speed response, a deadband while turning, and static friction that
 // takes more PWM to break than the deadband.
@@ -32,19 +33,40 @@ struct Wheel {
             speed += (steady - speed) * DT / tau;
             if (steady == 0 && fabsf(speed) < 0.002f) speed = 0;
         }
-        counts += speed * DT * ENCODER_CPR / TWO_PI_R;
+        counts += speed * DT * COUNTS_PER_TURN / TWO_PI_R;
     }
     int32_t count() const { return (int32_t)floor(counts); }
 };
 
-// The default config.h tuning: the same thing the firmware starts with.
+// The tests' own tuning, made for the default wheel above: its feed-forward is that wheel's deadband
+// and slope, and its kick is over the wheel's static friction. config.h holds what was measured on
+// the robot, which isn't this wheel, so the tests don't use it.
+static ControlTuning testTuning() {
+    const Wheel wheel;
+    ControlTuning t;
+    t.left = {wheel.deadband, wheel.slope, 550};
+    t.right = t.left;
+    t.kickMs = 40;
+    t.kp = 300;
+    t.ki = 2000;
+    t.trimMaxPwm = 250;
+    t.countsPerTurn = COUNTS_PER_TURN;
+    t.closedLoop = true;
+    return t;
+}
+
 struct Rig {
-    ControlTuning tuning = defaultTuning();
+    ControlTuning tuning = testTuning();
     WheelController controller{tuning.left, tuning};
     Wheel wheel;
     float lastPwm = 0;
     float maxPwm = 0;
     float maxTrim = 0;
+
+    // The output on feed-forward alone, with no trim or kick.
+    float feedForward(float target) const {
+        return tuning.left.deadbandPwm + tuning.left.slopePwmPerMps * target;
+    }
 
     void run(float target, float seconds) { runWith(target, seconds, [](int32_t c) { return c; }); }
 
@@ -64,14 +86,14 @@ struct Rig {
     float meanSpeed(float target, float seconds) {
         const double start = wheel.counts;
         run(target, seconds);
-        return (float)((wheel.counts - start) * TWO_PI_R / ENCODER_CPR / seconds);
+        return (float)((wheel.counts - start) * TWO_PI_R / COUNTS_PER_TURN / seconds);
     }
 
     // Same, through an encoder that shows nothing.
     float meanSpeedDeadEncoder(float target, float seconds) {
         const double start = wheel.counts;
         runWith(target, seconds, [](int32_t) { return 0; });
-        return (float)((wheel.counts - start) * TWO_PI_R / ENCODER_CPR / seconds);
+        return (float)((wheel.counts - start) * TWO_PI_R / COUNTS_PER_TURN / seconds);
     }
 };
 
@@ -95,9 +117,9 @@ void test_request_under_stop_speed_gives_zero_pwm() {
 void test_start_kicks_then_settles_to_feed_forward() {
     Rig rig;
     rig.tuning.closedLoop = false;
-    TEST_ASSERT_EQUAL_FLOAT(KICK_PWM_LEFT, rig.controller.update(0.02f, 0));
+    TEST_ASSERT_EQUAL_FLOAT(rig.tuning.left.kickPwm, rig.controller.update(0.02f, 0));
     rig.run(0.02f, 0.2f);
-    TEST_ASSERT_EQUAL_FLOAT(FF_DEADBAND_LEFT + FF_SLOPE_LEFT * 0.02f, rig.lastPwm);
+    TEST_ASSERT_EQUAL_FLOAT(rig.feedForward(0.02f), rig.lastPwm);
 }
 
 void test_negative_request_mirrors_positive() {
@@ -122,7 +144,7 @@ void test_closed_loop_tracks_with_correct_feed_forward() {
     }
 }
 
-// The real motor isn't what config.h guesses. The trim must make up the difference.
+// The motor isn't the one the tuning was made for. The trim must make up the difference.
 void test_closed_loop_tracks_with_wrong_feed_forward() {
     const struct { float deadband, slope, staticPwm, tau; } motors[] = {
         {100, 700, 200, 0.03f},
@@ -178,8 +200,8 @@ void test_dead_encoder_never_trims() {
     rig.runWith(0.02f, 5.0f, [](int32_t) { return 0; });
     TEST_ASSERT_EQUAL(EncoderFault::NoCounts, rig.controller.fault());
     TEST_ASSERT_EQUAL_FLOAT(0, rig.maxTrim);
-    TEST_ASSERT_EQUAL_FLOAT(FF_DEADBAND_LEFT + FF_SLOPE_LEFT * 0.02f, rig.lastPwm);
-    TEST_ASSERT_EQUAL_FLOAT(KICK_PWM_LEFT, rig.maxPwm);
+    TEST_ASSERT_EQUAL_FLOAT(rig.feedForward(0.02f), rig.lastPwm);
+    TEST_ASSERT_EQUAL_FLOAT(rig.tuning.left.kickPwm, rig.maxPwm);
 }
 
 // With B dead, the hardware decoder steps back and forth on every A edge.
@@ -196,8 +218,8 @@ void test_reversed_encoder_is_caught_without_runaway() {
     TEST_ASSERT_EQUAL(EncoderFault::WrongDirection, rig.controller.fault());
     rig.runWith(0.1f, 2.0f, [](int32_t c) { return -c; });
     TEST_ASSERT_EQUAL_FLOAT(0, rig.maxTrim);
-    TEST_ASSERT_EQUAL_FLOAT(FF_DEADBAND_LEFT + FF_SLOPE_LEFT * 0.1f, rig.lastPwm);
-    TEST_ASSERT_EQUAL_FLOAT(KICK_PWM_LEFT, rig.maxPwm);
+    TEST_ASSERT_EQUAL_FLOAT(rig.feedForward(0.1f), rig.lastPwm);
+    TEST_ASSERT_EQUAL_FLOAT(rig.tuning.left.kickPwm, rig.maxPwm);
     TEST_ASSERT_FLOAT_WITHIN(0.02f, 0.1f, rig.wheel.speed);
 }
 
@@ -208,7 +230,7 @@ void test_encoder_dying_while_driving_falls_back_to_feed_forward() {
     rig.runWith(0.1f, 2.0f, [frozen](int32_t) { return frozen; });
     TEST_ASSERT_EQUAL(EncoderFault::NoCounts, rig.controller.fault());
     TEST_ASSERT_EQUAL_FLOAT(0, rig.controller.trimPwm());
-    TEST_ASSERT_EQUAL_FLOAT(FF_DEADBAND_LEFT + FF_SLOPE_LEFT * 0.1f, rig.lastPwm);
+    TEST_ASSERT_EQUAL_FLOAT(rig.feedForward(0.1f), rig.lastPwm);
     TEST_ASSERT_FLOAT_WITHIN(0.02f, 0.1f, rig.wheel.speed);
 }
 
@@ -216,7 +238,7 @@ void test_losing_most_counts_ends_in_trim_saturated() {
     Rig rig;
     rig.runWith(0.1f, 6.0f, [](int32_t c) { return c / 5; });
     TEST_ASSERT_EQUAL(EncoderFault::TrimSaturated, rig.controller.fault());
-    TEST_ASSERT_EQUAL_FLOAT(FF_DEADBAND_LEFT + FF_SLOPE_LEFT * 0.1f, rig.lastPwm);
+    TEST_ASSERT_EQUAL_FLOAT(rig.feedForward(0.1f), rig.lastPwm);
     TEST_ASSERT_FLOAT_WITHIN(0.02f, 0.1f, rig.wheel.speed);
 }
 
@@ -229,7 +251,7 @@ void test_trim_at_its_limit_taking_power_away_is_kept() {
     rig.wheel.staticPwm = 200;
     rig.run(0.25f, 6.0f);
     TEST_ASSERT_EQUAL(EncoderFault::None, rig.controller.fault());
-    TEST_ASSERT_EQUAL_FLOAT(-TRIM_MAX_PWM, rig.controller.trimPwm());
+    TEST_ASSERT_EQUAL_FLOAT(-rig.tuning.trimMaxPwm, rig.controller.trimPwm());
     TEST_ASSERT_LESS_THAN_FLOAT(0.35f, rig.wheel.speed);
 }
 
@@ -238,7 +260,7 @@ void test_noise_burst_is_implausible() {
     rig.run(0.1f, 2.0f);
     rig.runWith(0.1f, 0.5f, [](int32_t c) { return c + 100000; });
     TEST_ASSERT_EQUAL(EncoderFault::Implausible, rig.controller.fault());
-    TEST_ASSERT_EQUAL_FLOAT(FF_DEADBAND_LEFT + FF_SLOPE_LEFT * 0.1f, rig.lastPwm);
+    TEST_ASSERT_EQUAL_FLOAT(rig.feedForward(0.1f), rig.lastPwm);
 }
 
 void test_blocked_wheel_does_not_wind_up() {
@@ -246,8 +268,8 @@ void test_blocked_wheel_does_not_wind_up() {
     rig.wheel.blocked = true;
     rig.run(0.05f, 5.0f);
     TEST_ASSERT_EQUAL(EncoderFault::NoCounts, rig.controller.fault());
-    TEST_ASSERT_EQUAL_FLOAT(FF_DEADBAND_LEFT + FF_SLOPE_LEFT * 0.05f, rig.lastPwm);
-    TEST_ASSERT_EQUAL_FLOAT(KICK_PWM_LEFT, rig.maxPwm);
+    TEST_ASSERT_EQUAL_FLOAT(rig.feedForward(0.05f), rig.lastPwm);
+    TEST_ASSERT_EQUAL_FLOAT(rig.tuning.left.kickPwm, rig.maxPwm);
 }
 
 void test_fault_clears_at_the_next_start_and_is_counted() {
@@ -325,18 +347,19 @@ void test_restart_while_still_rolling_gets_no_kick() {
     rig.run(0, 0.02f);
     rig.maxPwm = 0;
     rig.run(0.05f, 0.3f);
-    TEST_ASSERT_LESS_THAN_FLOAT(KICK_PWM_LEFT, rig.maxPwm);
+    TEST_ASSERT_LESS_THAN_FLOAT(rig.tuning.left.kickPwm, rig.maxPwm);
 }
 
 void test_request_flickering_around_stop_speed_limits_kicks() {
     Rig rig;
+    const float kick = rig.tuning.left.kickPwm;
     int kicks = 0;
     float last = 0;
     const int ticks = 200;  // 2 s
     for (int i = 0; i < ticks; i++) {
         const float request = (i / 5) % 2 == 0 ? 0.012f : 0.008f;  // flips every 50 ms
         const float pwm = rig.controller.update(request, rig.wheel.count());
-        if (pwm >= KICK_PWM_LEFT && last < KICK_PWM_LEFT) kicks++;
+        if (pwm >= kick && last < kick) kicks++;
         last = pwm;
         rig.wheel.step(pwm);
     }
@@ -347,7 +370,7 @@ void test_request_flickering_around_stop_speed_limits_kicks() {
 // Timeout and the force test
 
 void test_no_drive_before_the_first_command() {
-    ControlTuning tuning = defaultTuning();
+    ControlTuning tuning = testTuning();
     DriveController drive(tuning);
     DriveCommand cmd;
     float l = 1, r = 1;
@@ -357,7 +380,7 @@ void test_no_drive_before_the_first_command() {
 }
 
 static void assertTimeoutAt(uint32_t start) {
-    ControlTuning tuning = defaultTuning();
+    ControlTuning tuning = testTuning();
     DriveController drive(tuning);
     DriveCommand cmd;
     cmd.setVelocity(0.2f, -0.2f, start);
@@ -380,7 +403,7 @@ void test_command_timeout_stops_and_a_new_command_restarts() {
 }
 
 void test_force_runs_raw_pwm_then_stops_by_itself() {
-    ControlTuning tuning = defaultTuning();
+    ControlTuning tuning = testTuning();
     DriveController drive(tuning);
     DriveCommand cmd;
     cmd.setForce(300, -700, 1000);
@@ -394,7 +417,7 @@ void test_force_runs_raw_pwm_then_stops_by_itself() {
 }
 
 void test_force_and_velocity_cancel_each_other() {
-    ControlTuning tuning = defaultTuning();
+    ControlTuning tuning = testTuning();
     DriveController drive(tuning);
     DriveCommand cmd;
     float l, r;
@@ -414,7 +437,7 @@ void test_force_and_velocity_cancel_each_other() {
 // In the firmware, expire() runs every tick. Without it, an old command would count as new again
 // when millis() comes round, days later.
 void test_expired_commands_never_come_back() {
-    ControlTuning tuning = defaultTuning();
+    ControlTuning tuning = testTuning();
     DriveController drive(tuning);
     float l, r;
 
@@ -488,6 +511,31 @@ void test_parses_test_commands() {
     TEST_ASSERT_EQUAL(CommandType::Invalid, parseCommand("g a_name_that_is_too_long 1").type);
 }
 
+// ---------------------------------------------------------------------------------------------
+// config.h's tuning
+
+// The tests above run on their own tuning. The one measured on the robot is only checked for what
+// any tuning needs: each wheel gets its own values, and they stay within the PWM range.
+void test_config_tuning_is_within_the_limits() {
+    const ControlTuning t = defaultTuning();
+    TEST_ASSERT_EQUAL_FLOAT(FF_DEADBAND_LEFT, t.left.deadbandPwm);
+    TEST_ASSERT_EQUAL_FLOAT(FF_SLOPE_LEFT, t.left.slopePwmPerMps);
+    TEST_ASSERT_EQUAL_FLOAT(KICK_PWM_LEFT, t.left.kickPwm);
+    TEST_ASSERT_EQUAL_FLOAT(FF_DEADBAND_RIGHT, t.right.deadbandPwm);
+    TEST_ASSERT_EQUAL_FLOAT(FF_SLOPE_RIGHT, t.right.slopePwmPerMps);
+    TEST_ASSERT_EQUAL_FLOAT(KICK_PWM_RIGHT, t.right.kickPwm);
+    for (const WheelTuning& w : {t.left, t.right}) {
+        TEST_ASSERT_GREATER_OR_EQUAL_FLOAT(0, w.deadbandPwm);
+        TEST_ASSERT_GREATER_THAN_FLOAT(0, w.slopePwmPerMps);
+        TEST_ASSERT_GREATER_THAN_FLOAT(w.deadbandPwm, w.kickPwm);  // starting takes more than keeping going
+        TEST_ASSERT_LESS_OR_EQUAL_FLOAT(PWM_MAX, w.kickPwm);
+        // Feed-forward at 0.25 m/s, the top of the range FIRST_DRIVE.md checks.
+        TEST_ASSERT_LESS_OR_EQUAL_FLOAT(PWM_MAX, w.deadbandPwm + w.slopePwmPerMps * 0.25f);
+    }
+    TEST_ASSERT_GREATER_THAN_FLOAT(0, t.trimMaxPwm);
+    TEST_ASSERT_LESS_THAN_FLOAT(PWM_MAX, t.trimMaxPwm);
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_request_under_stop_speed_gives_zero_pwm);
@@ -522,5 +570,6 @@ int main() {
     RUN_TEST(test_parses_what_the_bridge_sends);
     RUN_TEST(test_rejects_damaged_velocity_lines);
     RUN_TEST(test_parses_test_commands);
+    RUN_TEST(test_config_tuning_is_within_the_limits);
     return UNITY_END();
 }

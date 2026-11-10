@@ -73,7 +73,7 @@ Lines end in `\r` or `\n`. A malformed line is ignored.
     -   A request under 0.01 m/s stops that wheel. With no `m` for 500 ms, both wheels stop.
 -   **Force Test**: `f <pwm>` or `f <left_pwm> <right_pwm>`
     -   Example: `f 300` (raw PWM, no control, stops after 2 seconds unless repeated; `f 0` or any `m` ends it)
--   **Diagnostics**: `d` prints one line per wheel, the encoder pins' activity, and board state
+-   **Diagnostics**: `d` prints one line per wheel, the encoder pins' activity, board state, and the gyro offsets in use
 -   **Tuning**: `g` prints the tuning values, and `g <name> <value>` changes one until the next reboot
     -   Names: `closed dead_l dead_r slope_l slope_r kick_l kick_r kick_ms kp ki trim cpr`
 
@@ -81,7 +81,8 @@ Lines end in `\r` or `\n`. A malformed line is ignored.
 -   **Encoders**: `e <left_counts> <right_counts>` at 50 Hz
     -   Example: `e 14500 -14620`. A wheel's count goes up on a positive request for that wheel.
 -   **IMU**: `i <ax> <ay> <az> <gx> <gy> <gz>` at 50 Hz, in m/s² and rad/s
-    -   Example: `i 0.20 0.14 -9.94 -0.01 0.01 0.01`
+    -   Example: `i 1.270 -0.232 -10.249 0.0001 -0.0002 -0.0001` (3 decimals, and 4 for the gyro)
+    -   The gyro's resting offsets are subtracted. They start at `config.h`'s `GYRO_BIAS_*` values and are measured again whenever the robot stands still (no PWM, and neither wheel turning), since they drift as the board warms up.
     -   A failed read sends no line. After half a second of those, `i` lines stop until the IMU is found again.
 -   **Boot**: `LLC_READY`, followed by ` ENCODER_ERROR` or ` IMU_ERROR` if one failed to start
 -   **Fault**: `d fault <L|R> <reason>` when a wheel drops to feed-forward alone. Reasons:

@@ -12,6 +12,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include "CommandParser.h"
+#include "GyroOffset.h"
 #include "MotorControl.h"
 #include "SpeedControl.h"
 #include "config.h"
@@ -28,6 +29,9 @@ Adafruit_MPU6050 mpu;
 
 static ControlTuning tuning = defaultTuning();
 static DriveController drive(tuning);
+
+static const GyroOffsetTuning gyroTuning = defaultGyroOffsetTuning();
+static GyroOffset gyroOffset(gyroTuning);
 
 static portMUX_TYPE commandMux = portMUX_INITIALIZER_UNLOCKED;
 static DriveCommand sharedCommand;
@@ -120,10 +124,16 @@ static void sendImuLine() {
     filteredAY = (IMU_LPF_ALPHA * a.acceleration.y) + ((1.0f - IMU_LPF_ALPHA) * filteredAY);
     filteredAZ = (IMU_LPF_ALPHA * a.acceleration.z) + ((1.0f - IMU_LPF_ALPHA) * filteredAZ);
 
+    // The offsets start at config.h's GYRO_BIAS values and are measured again while the robot
+    // stands still, since they drift as the board warms up.
+    const float gyro[3] = {g.gyro.x, g.gyro.y, g.gyro.z};
+    gyroOffset.update(gyro, leftPwmNow != 0 || rightPwmNow != 0, MotorControl::getLeftTicks(),
+                      MotorControl::getRightTicks(), millis());
+
     // 4 decimals for the gyro, whose own step at +/-250 deg/s is 0.00013 rad/s. With 2, its resting
     // offsets could only be read to about 0.005 rad/s, a quarter of a degree per second.
     sendFormatted("i %.3f %.3f %.3f %.4f %.4f %.4f\r\n", filteredAX, filteredAY, filteredAZ,
-                  g.gyro.x - GYRO_BIAS_X, g.gyro.y - GYRO_BIAS_Y, g.gyro.z - GYRO_BIAS_Z);
+                  gyro[0] - gyroOffset.offset(0), gyro[1] - gyroOffset.offset(1), gyro[2] - gyroOffset.offset(2));
 }
 
 // `g` names. These are the values in the "set from a measurement" block of config.h.
@@ -193,6 +203,11 @@ static void printDiagnostics() {
 
     sendFormatted("d encoders=%d imu=%d imu_bad_reads=%lu uptime_ms=%lu\r\n", encodersReady ? 1 : 0, imuReady ? 1 : 0,
                   (unsigned long)imuBadReads, (unsigned long)millis());
+
+    // The gyro offsets in use, and how many still windows were used to update them or turned down.
+    sendFormatted("d gyro_offset x=%.4f y=%.4f z=%.4f windows_used=%lu windows_rejected=%lu\r\n",
+                  gyroOffset.offset(0), gyroOffset.offset(1), gyroOffset.offset(2),
+                  (unsigned long)gyroOffset.windowsUsed(), (unsigned long)gyroOffset.windowsRejected());
 }
 
 static void handleLine(const char* text) {

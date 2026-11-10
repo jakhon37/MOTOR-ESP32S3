@@ -6,6 +6,7 @@
 #include <unity.h>
 #include <initializer_list>
 #include "CommandParser.h"
+#include "GyroOffset.h"
 #include "SpeedControl.h"
 
 static const float DT = CONTROL_PERIOD_MS / 1000.0f;
@@ -512,6 +513,137 @@ void test_parses_test_commands() {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Gyro offsets
+
+// Start offsets like the robot's, but fixed here like the tuning above.
+static GyroOffsetTuning testGyroTuning() {
+    GyroOffsetTuning t;
+    t.start[0] = -0.009f;
+    t.start[1] = -0.057f;
+    t.start[2] = -0.012f;
+    t.settleMs = 1000;
+    t.windowReadings = 100;
+    t.maxCounts = 2;
+    t.maxSd = 0.015f;
+    t.maxShift = 0.02f;
+    t.rate = 0.25f;
+    return t;
+}
+
+// Feeds gyro readings at 50 Hz, as the firmware does. noise alternates up and down, so it leaves
+// a window's mean alone and is the readings' standard deviation.
+struct GyroRig {
+    GyroOffsetTuning tuning = testGyroTuning();
+    GyroOffset offsets{tuning};
+    uint32_t nowMs = 0;
+    int32_t left = 0;
+    int32_t right = 0;
+    int32_t leftStep = 0;  // counts the left wheel moves per reading
+
+    void feed(float seconds, float x, float y, float z, bool driven = false, float noise = 0) {
+        const long readings = lroundf(seconds * 50);
+        for (long i = 0; i < readings; i++) {
+            const float wobble = (i % 2 == 0) ? noise : -noise;
+            const float gyro[3] = {x + wobble, y + wobble, z + wobble};
+            offsets.update(gyro, driven, left, right, nowMs);
+            left += leftStep;
+            nowMs += 20;
+        }
+    }
+
+    // Standing still, with z reading dz away from its start offset.
+    void feedStill(float seconds, float dz, float noise = 0) {
+        feed(seconds, tuning.start[0], tuning.start[1], tuning.start[2] + dz, false, noise);
+    }
+};
+
+void test_gyro_offset_follows_the_gyro_while_still() {
+    GyroRig rig;
+    rig.feedStill(3, 0.002f);  // 1 s to settle, then one 2 s window
+    TEST_ASSERT_EQUAL_UINT32(1, rig.offsets.windowsUsed());
+    TEST_ASSERT_FLOAT_WITHIN(1e-5f, -0.012f + 0.25f * 0.002f, rig.offsets.offset(2));
+    rig.feedStill(60, 0.002f);
+    TEST_ASSERT_FLOAT_WITHIN(1e-5f, -0.010f, rig.offsets.offset(2));
+    TEST_ASSERT_FLOAT_WITHIN(1e-5f, -0.009f, rig.offsets.offset(0));
+    TEST_ASSERT_FLOAT_WITHIN(1e-5f, -0.057f, rig.offsets.offset(1));
+}
+
+void test_gyro_offset_waits_for_the_robot_to_settle() {
+    GyroRig rig;
+    rig.feedStill(2.9f, 0.002f);  // 1 s to settle, then 95 of a window's 100 readings
+    TEST_ASSERT_EQUAL_UINT32(0, rig.offsets.windowsUsed());
+    rig.feedStill(0.1f, 0.002f);
+    TEST_ASSERT_EQUAL_UINT32(1, rig.offsets.windowsUsed());
+}
+
+void test_gyro_offset_starts_over_after_the_motors_run() {
+    GyroRig rig;
+    rig.feedStill(2, 0.002f);           // half a window
+    rig.feed(0.2f, 0, 0, 0.5f, true);  // a turn
+    rig.feedStill(2.9f, 0.002f);
+    TEST_ASSERT_EQUAL_UINT32(0, rig.offsets.windowsUsed());
+    rig.feedStill(0.1f, 0.002f);
+    TEST_ASSERT_EQUAL_UINT32(1, rig.offsets.windowsUsed());
+    TEST_ASSERT_FLOAT_WITHIN(1e-5f, -0.012f + 0.25f * 0.002f, rig.offsets.offset(2));  // no trace of the turn
+}
+
+void test_gyro_offset_learns_nothing_while_a_wheel_turns() {
+    // Motors off, but the robot pushed along: a count moves.
+    GyroRig rig;
+    rig.leftStep = 3;
+    rig.feedStill(10, 0.002f);
+    TEST_ASSERT_EQUAL_UINT32(0, rig.offsets.windowsUsed() + rig.offsets.windowsRejected());
+    rig.leftStep = 0;
+    rig.feedStill(2.9f, 0.002f);
+    TEST_ASSERT_EQUAL_UINT32(0, rig.offsets.windowsUsed());
+    rig.feedStill(0.1f, 0.002f);
+    TEST_ASSERT_EQUAL_UINT32(1, rig.offsets.windowsUsed());
+}
+
+void test_gyro_offset_allows_one_count_of_flicker() {
+    // A wheel resting on an encoder edge can flick between two counts.
+    GyroRig rig;
+    for (int i = 0; i < 150; i++) {
+        rig.left = i % 2;
+        rig.feedStill(0.02f, 0.002f);
+    }
+    TEST_ASSERT_EQUAL_UINT32(1, rig.offsets.windowsUsed());
+}
+
+void test_gyro_offset_accepts_the_gyros_own_noise() {
+    // At rest on the floor the readings' standard deviation was up to 0.0057 rad/s.
+    GyroRig rig;
+    rig.feedStill(3, 0.002f, 0.006f);
+    TEST_ASSERT_EQUAL_UINT32(1, rig.offsets.windowsUsed());
+    TEST_ASSERT_FLOAT_WITHIN(1e-5f, -0.012f + 0.25f * 0.002f, rig.offsets.offset(2));
+}
+
+void test_gyro_offset_skips_a_handled_robot() {
+    // Readings spread wider than the gyro's own noise: a hand on the robot.
+    GyroRig rig;
+    rig.feedStill(3, 0.002f, 0.02f);
+    TEST_ASSERT_EQUAL_UINT32(0, rig.offsets.windowsUsed());
+    TEST_ASSERT_EQUAL_UINT32(1, rig.offsets.windowsRejected());
+    TEST_ASSERT_EQUAL_FLOAT(-0.012f, rig.offsets.offset(2));
+}
+
+void test_gyro_offset_skips_a_slow_turn() {
+    // The wheels lifted and the robot turned slowly by hand: steady, but too far from any offset.
+    GyroRig rig;
+    rig.feedStill(3, 0.05f);
+    TEST_ASSERT_EQUAL_UINT32(0, rig.offsets.windowsUsed());
+    TEST_ASSERT_EQUAL_UINT32(1, rig.offsets.windowsRejected());
+    TEST_ASSERT_EQUAL_FLOAT(-0.012f, rig.offsets.offset(2));
+}
+
+void test_gyro_offset_survives_millis_wrapping() {
+    GyroRig rig;
+    rig.nowMs = 0xFFFFFFFFu - 500;
+    rig.feedStill(3, 0.002f);
+    TEST_ASSERT_EQUAL_UINT32(1, rig.offsets.windowsUsed());
+}
+
+// ---------------------------------------------------------------------------------------------
 // config.h's tuning
 
 // The tests above run on their own tuning. The one measured on the robot is only checked for what
@@ -534,6 +666,22 @@ void test_config_tuning_is_within_the_limits() {
     }
     TEST_ASSERT_GREATER_THAN_FLOAT(0, t.trimMaxPwm);
     TEST_ASSERT_LESS_THAN_FLOAT(PWM_MAX, t.trimMaxPwm);
+}
+
+void test_config_gyro_learning_is_within_the_limits() {
+    const GyroOffsetTuning t = defaultGyroOffsetTuning();
+    TEST_ASSERT_EQUAL_FLOAT(GYRO_BIAS_X, t.start[0]);
+    TEST_ASSERT_EQUAL_FLOAT(GYRO_BIAS_Y, t.start[1]);
+    TEST_ASSERT_EQUAL_FLOAT(GYRO_BIAS_Z, t.start[2]);
+    TEST_ASSERT_GREATER_THAN_UINT32(0, t.settleMs);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(50, t.windowReadings);  // a second of readings at least
+    TEST_ASSERT_GREATER_THAN_INT32(1, t.maxCounts);             // one count of flicker is still
+    // Above the gyro's own noise at rest (standard deviation up to 0.0057 rad/s), below a hand on it.
+    TEST_ASSERT_GREATER_THAN_FLOAT(0.006f, t.maxSd);
+    TEST_ASSERT_LESS_THAN_FLOAT(0.05f, t.maxSd);
+    TEST_ASSERT_GREATER_THAN_FLOAT(0, t.maxShift);
+    TEST_ASSERT_GREATER_THAN_FLOAT(0, t.rate);
+    TEST_ASSERT_LESS_OR_EQUAL_FLOAT(1, t.rate);
 }
 
 int main() {
@@ -570,6 +718,16 @@ int main() {
     RUN_TEST(test_parses_what_the_bridge_sends);
     RUN_TEST(test_rejects_damaged_velocity_lines);
     RUN_TEST(test_parses_test_commands);
+    RUN_TEST(test_gyro_offset_follows_the_gyro_while_still);
+    RUN_TEST(test_gyro_offset_waits_for_the_robot_to_settle);
+    RUN_TEST(test_gyro_offset_starts_over_after_the_motors_run);
+    RUN_TEST(test_gyro_offset_learns_nothing_while_a_wheel_turns);
+    RUN_TEST(test_gyro_offset_allows_one_count_of_flicker);
+    RUN_TEST(test_gyro_offset_accepts_the_gyros_own_noise);
+    RUN_TEST(test_gyro_offset_skips_a_handled_robot);
+    RUN_TEST(test_gyro_offset_skips_a_slow_turn);
+    RUN_TEST(test_gyro_offset_survives_millis_wrapping);
     RUN_TEST(test_config_tuning_is_within_the_limits);
+    RUN_TEST(test_config_gyro_learning_is_within_the_limits);
     return UNITY_END();
 }

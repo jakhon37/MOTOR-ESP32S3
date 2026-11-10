@@ -46,11 +46,26 @@
 
 // Gyro offsets at rest, in rad/s and the IMU's own frame (it's mounted upside down), subtracted
 // before the `i` line is sent. Measured on 2026-11-10 over 60 s on the floor, 3,000 samples, with
-// the same means in both halves. Uncorrected, Z alone turned the heading 0.7 deg/s. They drift
-// with temperature, so remeasure if the robot's heading creeps at rest.
+// the same means in both halves. Uncorrected, Z alone turned the heading 0.7 deg/s. They're where
+// the firmware starts: the learning below follows them as they drift with temperature.
 #define GYRO_BIAS_X       -0.0092f
 #define GYRO_BIAS_Y       -0.0569f
 #define GYRO_BIAS_Z       -0.0122f
+
+// On the robot z drifted by 0.003 rad/s within 20 minutes of the offsets being measured, and by
+// 0.0017 after 8 hours powered, enough to turn the EKF's heading 4.8 deg a minute at rest. So the
+// offsets are measured again whenever the robot stands still: no PWM on either motor, and neither
+// wheel count moving by GYRO_LEARN_MAX_COUNTS, for GYRO_LEARN_SETTLE_MS. Each window of
+// GYRO_LEARN_WINDOW readings (2 s at 50 Hz) whose standard deviation stays under
+// GYRO_LEARN_MAX_SD on every axis, and whose mean is within GYRO_LEARN_MAX_SHIFT of the offsets
+// above, moves the offsets GYRO_LEARN_RATE of the way to its mean. At rest on the floor the
+// readings' standard deviation was 0.003 to 0.006 rad/s. `d` prints the offsets in use.
+#define GYRO_LEARN_SETTLE_MS   1000
+#define GYRO_LEARN_WINDOW      100
+#define GYRO_LEARN_MAX_COUNTS  2
+#define GYRO_LEARN_MAX_SD      0.015f  // rad/s
+#define GYRO_LEARN_MAX_SHIFT   0.02f   // rad/s, about 7 times the largest drift seen
+#define GYRO_LEARN_RATE        0.25f
 
 // -----------------------------
 // Robot Physical Specs

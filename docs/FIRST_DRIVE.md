@@ -169,6 +169,7 @@ Each drive command asks you to confirm the wheels are off the ground. The first 
 python3 /tmp/motor-fw/wheel_test.py direction | tee /tmp/motor-fw/direction.log
 ```
 
+- [ ] The wheel that turns is the one it names, seen from behind the robot. If the other one turns, the motor plugs are swapped left for right: swap them back, or swap the `LEFT_*` and `RIGHT_*` blocks in `config.h`, motor and encoder pins together. Each plug carries its motor and its encoder, so with the plugs swapped both wheels still count the right way, and straight drives look fine, but every turn goes the wrong way. Both wheels running backward with no fault can mean this too, not only two plugs turned round.
 - [ ] Each wheel turns **forward** when driven alone, for 2 s, then stops. If not, swap the two numbers it names in `config.h` (`*_MOTOR_IN1`, `*_MOTOR_IN2`), rebuild and reflash. Don't change the sign in the bridge.
 - [ ] It reports `Count direction OK` for each wheel. If it says to flip a `*_ENCODER_SIGN`, do that, and rebuild and reflash.
 - [ ] LED was blue while driving and green after. Orange or a `board says` line means that wheel fell back to feed-forward alone: see "If something goes wrong" at the end.

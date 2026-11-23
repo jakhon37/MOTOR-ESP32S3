@@ -38,6 +38,8 @@ This repository contains the firmware for the ESP32-S3 motor controller used in 
 | **BIN1** | **GPIO 8** | Right Motor Dir 1 |
 | **BIN2** | **GPIO 7** | Right Motor Dir 2 |
 
+On the robot since 2026-11-23 the two motor plugs are swapped: the A side and encoder pins 18 and 14 go to the right motor, and the B side and pins 4 and 5 to the left. `include/config.h` follows the robot, so its left wheel uses the B side's pins.
+
 ### **Encoders**
 | Encoder Pin | ESP32-S3 Pin | Note |
 | :--- | :--- | :--- |

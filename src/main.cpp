@@ -38,6 +38,15 @@ static DriveCommand sharedCommand;
 
 static volatile float leftPwmNow = 0, rightPwmNow = 0;  // what the motors are getting, for `d`
 
+// The counts as the control task last read them, and when, in microseconds, for the `e` line.
+struct EncoderRead {
+    int32_t left;
+    int32_t right;
+    uint32_t us;
+};
+static portMUX_TYPE encoderMux = portMUX_INITIALIZER_UNLOCKED;
+static EncoderRead lastEncoderRead = {0, 0, 0};
+
 static bool encodersReady = false;
 static bool imuReady = false;
 static uint8_t imuBadInARow = 0;
@@ -49,7 +58,11 @@ static void controlTask(void*) {
     for (;;) {
         vTaskDelayUntil(&wake, pdMS_TO_TICKS(CONTROL_PERIOD_MS));
 
+        const uint32_t readMicros = micros();
         MotorControl::updateEncoders();
+        portENTER_CRITICAL(&encoderMux);
+        lastEncoderRead = {MotorControl::getLeftTicks(), MotorControl::getRightTicks(), readMicros};
+        portEXIT_CRITICAL(&encoderMux);
         MotorControl::sampleEncoderPins();
 
         const uint32_t now = millis();
@@ -89,8 +102,15 @@ static bool beginImu() {
     return true;
 }
 
+// `e <left> <right> <us>`: the counts, and when the control task read them. The bridge divides the
+// counts' change by the time between two reads, so the speeds stay right however late the host gets
+// to a line, or if one is lost. The lines go every 20 ms and the reads every 10 ms, so when the two
+// fall in the same millisecond a line can hold the read before. The time wraps every 71.6 minutes.
 static void sendEncoderLine() {
-    sendFormatted("e %ld %ld\r\n", (long)MotorControl::getLeftTicks(), (long)MotorControl::getRightTicks());
+    portENTER_CRITICAL(&encoderMux);
+    const EncoderRead read = lastEncoderRead;
+    portEXIT_CRITICAL(&encoderMux);
+    sendFormatted("e %ld %ld %lu\r\n", (long)read.left, (long)read.right, (unsigned long)read.us);
 }
 
 // getEvent doesn't report a failed read. It gives garbage instead, and a failed read of the range

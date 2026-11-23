@@ -115,7 +115,7 @@ See the raw lines and the boot line. This resets the board through the USB contr
 python3 /tmp/motor-fw/wheel_test.py lines --reset --seconds 2 | awk 'NR<=4 || /READY/ || /Lost/'
 ```
 
-- [ ] Lines look like `e 0 0` and `i 0.20 0.14 -9.94 -0.01 0.01 0.01`, the same as before.
+- [ ] Lines look like `e 0 0 2051234` and `i 0.20 0.14 -9.94 -0.01 0.01 0.01`. The `e` line's last number is the board's clock in microseconds, and it grows by about 20,000 per line.
 - [ ] `Boot line with READY seen: yes`. If the USB link dropped instead and it says `Lost the serial port`, that isn't a failure: the bridge reconnects and takes a new baseline when that happens. Check the port is back as `ttyACM0`.
 
 ## 5. Encoder wiring and counts per turn: by hand, no motor commands

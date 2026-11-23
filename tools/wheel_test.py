@@ -92,7 +92,7 @@ class Board:
             self.line_counts[parts[0]] += 1
         if self.echo == "all" or (self.echo == "replies" and not telemetry):
             print(line)
-        if len(parts) == 3 and parts[0] == "e":
+        if len(parts) >= 3 and parts[0] == "e":  # the time the counts were read, if sent, isn't needed here
             try:
                 self.counts = {"L": int(parts[1]), "R": int(parts[2])}
             except ValueError:

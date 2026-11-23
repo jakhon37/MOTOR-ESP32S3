@@ -80,8 +80,9 @@ Lines end in `\r` or `\n`. A malformed line is ignored.
     -   Names: `closed dead_l dead_r slope_l slope_r kick_l kick_r kick_ms kp ki trim cpr`
 
 ### **Uplink (ESP32 -> ROS)**
--   **Encoders**: `e <left_counts> <right_counts>` at 50 Hz
-    -   Example: `e 14500 -14620`. A wheel's count goes up on a positive request for that wheel.
+-   **Encoders**: `e <left_counts> <right_counts> <micros>` at 50 Hz
+    -   Example: `e 14500 -14620 83021540`. A wheel's count goes up on a positive request for that wheel.
+    -   `micros` is the board's clock, in microseconds, when the control task read the counts (every 10 ms). The host divides the change in counts by the change in `micros`, so its speeds don't depend on when it reads the lines. It wraps every 71.6 minutes. Firmware before this sent only the counts.
 -   **IMU**: `i <ax> <ay> <az> <gx> <gy> <gz>` at 50 Hz, in m/s² and rad/s
     -   Example: `i 1.270 -0.232 -10.249 0.0001 -0.0002 -0.0001` (3 decimals, and 4 for the gyro)
     -   The gyro's resting offsets are subtracted. They start at `config.h`'s `GYRO_BIAS_*` values and are measured again whenever the robot stands still (no PWM, and neither wheel turning), since they drift as the board warms up.

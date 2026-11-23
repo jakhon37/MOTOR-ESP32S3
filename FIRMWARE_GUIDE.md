@@ -44,8 +44,9 @@ The ESP32 communicates with the Jetson Nano via a lightweight ASCII protocol.
 *   **Safety:** If no `m` command is received for **500ms**, the robot will trigger an Emergency Stop (E-Stop).
 
 ### Uplink (Telemetry)
-**Format:** `e <left_counts> <right_counts>\r\n`
-*   **Example:** `e 1250 -1250\r\n`
+**Format:** `e <left_counts> <right_counts> <micros>\r\n`
+*   **Example:** `e 1250 -1250 83021540\r\n`
+*   **`micros`:** when the counts were read, on the board's microsecond clock, which wraps every 71.6 minutes.
 *   **Frequency:** 50Hz.
 
 **Format:** `i <ax> <ay> <az> <gx> <gy> <gz>\r\n`

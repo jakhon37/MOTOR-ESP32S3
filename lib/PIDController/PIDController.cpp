@@ -37,6 +37,10 @@ void PIDController::setTunings(float kp, float ki, float kd) {
     m_kp = kp; m_ki = ki; m_kd = kd;
 }
 
+void PIDController::setOutputLimits(float out_min, float out_max) {
+    m_min_out = out_min; m_max_out = out_max;
+}
+
 void PIDController::reset() {
     m_integral = 0;
     m_last_error = 0;

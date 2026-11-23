@@ -5,12 +5,17 @@
 // -----------------------------
 // Motor Driver (TB6612FNG) Pin Definitions
 // -----------------------------
-#define LEFT_MOTOR_IN1    3
-#define LEFT_MOTOR_IN2    10
+// IN1 is driven high for a positive `m` request and IN2 for a negative one. On the driver, GPIO 3
+// and 10 go to AIN1 and AIN2, and GPIO 8 and 7 to BIN1 and BIN2, as in the README. Since the
+// rewiring on 2026-11-23 both motor plugs are reversed: each wheel turned backward on a forward
+// request. Both pairs are swapped here to match, with both *_ENCODER_SIGN below. If the plugs are
+// ever turned round, swap all four back.
+#define LEFT_MOTOR_IN1    10
+#define LEFT_MOTOR_IN2    3
 #define LEFT_MOTOR_PWM    11
 
-#define RIGHT_MOTOR_IN1   8
-#define RIGHT_MOTOR_IN2   7
+#define RIGHT_MOTOR_IN1   7
+#define RIGHT_MOTOR_IN2   8
 #define RIGHT_MOTOR_PWM   6
 
 // -----------------------------
@@ -30,8 +35,10 @@
 // while B is low. Set from the first drive on 2026-11-09: with the robot's wiring the left count
 // ran backwards on a forward request, and the right one was right.
 // Flip one if the wheel test shows wrong_dir: the bridge expects this rule on both wheels.
-#define LEFT_ENCODER_SIGN   (-1)
-#define RIGHT_ENCODER_SIGN  (-1)
+// Both flipped on 2026-11-23, with the motor pins above, for the reversed motor plugs: pushed
+// forward 45 cm by hand, the left counted -3,159 and the right +3,138, both backwards.
+#define LEFT_ENCODER_SIGN   (1)
+#define RIGHT_ENCODER_SIGN  (1)
 
 // Edges shorter than this are ignored, in 80 MHz clock cycles (hardware limit 1023).
 // 800 is 10 us, against about 140 us between real edges at full speed.

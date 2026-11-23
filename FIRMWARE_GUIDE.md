@@ -58,8 +58,10 @@ The ESP32 communicates with the Jetson Nano via a lightweight ASCII protocol.
 
 | Component | Function | Pin |
 | :--- | :--- | :--- |
-| **Left Motor** | IN1 / IN2 / PWM | 3 / 10 / 11 |
-| **Right Motor**| IN1 / IN2 / PWM | 8 / 7 / 6 |
+| **Left Motor** | IN1 / IN2 / PWM | 10 / 3 / 11 |
+| **Right Motor**| IN1 / IN2 / PWM | 7 / 8 / 6 |
+
+IN1 and IN2 are swapped on both motors against the driver's AIN1/AIN2 and BIN1/BIN2 (GPIO 3/10 and 8/7, as in the README), because the robot's motor plugs are reversed since 2026-11-23. Both encoder signs are flipped with them. See `include/config.h`.
 | **Left Encoder**| Phase A / B | 18 / 17 |
 | **Right Encoder**| Phase A / B | 4 / 5 |
 | **IMU (MPU6050)**| SDA / SCL | 1 / 21 |

@@ -271,7 +271,7 @@ def cmd_turns(board, args):
 def cmd_direction(board, args):
     confirm_drive()
     for wheel, name in (("L", "left"), ("R", "right")):
-        input(f"Watch the {name} wheel. Press Enter to drive it for 2 s.")
+        input(f"Watch both wheels from behind the robot. Press Enter to drive the {name} one for 2 s.")
         start = board.counts[wheel]
         left, right = wheel_command(wheel, 0.1)
         drive_for(2.0, lambda: board.velocity(left, right))
@@ -282,12 +282,20 @@ def cmd_direction(board, args):
         print(f"  Sent 'm {left:.3f} {right:.3f}'. Count changed by {moved:+d}. Board: "
               f"pwm={info.get('pwm')} feedback={info.get('feedback')} fault={info.get('fault')}")
         answer = ""
-        while answer not in ("f", "b", "n"):
-            answer = input(f"  Which way did the {name} wheel turn: forward, backward, or not at all? [f/b/n] ").strip().lower()[:1]
+        while answer not in ("l", "r", "n"):
+            answer = input("  Which wheel turned, seen from behind: left, right, or neither? [l/r/n] ").strip().lower()[:1]
         if answer == "n":
             print("  It didn't turn, so this says nothing about direction. Check the motor power and the driver's"
                   " wiring. If those are fine, raise the kick.")
             continue
+        if answer != wheel.lower():
+            # Each plug carries its motor and its encoder, so the count still follows the request.
+            print(f"  The {name} channel turned the other wheel: the motor plugs are swapped left for right. Swap them"
+                  " back, or swap the LEFT_* and RIGHT_* pin blocks in config.h, motor and encoder pins together.")
+            continue
+        answer = ""
+        while answer not in ("f", "b"):
+            answer = input(f"  Which way did the {name} wheel turn: forward or backward? [f/b] ").strip().lower()[:1]
         forward = answer == "f"
         if not forward:
             print(f"  Wrong way. Swap the numbers of {name.upper()}_MOTOR_IN1 and {name.upper()}_MOTOR_IN2 in config.h.")

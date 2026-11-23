@@ -5,30 +5,37 @@
 // -----------------------------
 // Motor Driver (TB6612FNG) Pin Definitions
 // -----------------------------
-#define LEFT_MOTOR_IN1    3
-#define LEFT_MOTOR_IN2    10
-#define LEFT_MOTOR_PWM    11
+// IN1 is driven high for a positive `m` request and IN2 for a negative one. The README's table
+// gives the driver's A side (GPIO 11, 3 and 10, with encoder pins 18 and 14) to the left motor and
+// the B side (GPIO 6, 8 and 7, with encoder pins 4 and 5) to the right. Since the rewiring on
+// 2026-11-23 the two motor plugs are swapped on the robot, each carrying its motor and encoder: the
+// A side goes to the right wheel and the B side to the left. So the two blocks below, and the two
+// encoder blocks, are swapped against the README. If the plugs are ever swapped back, swap all four
+// blocks back. A wheel test only catches this if someone checks which wheel turns.
+#define LEFT_MOTOR_IN1    8
+#define LEFT_MOTOR_IN2    7
+#define LEFT_MOTOR_PWM    6
 
-#define RIGHT_MOTOR_IN1   8
-#define RIGHT_MOTOR_IN2   7
-#define RIGHT_MOTOR_PWM   6
+#define RIGHT_MOTOR_IN1   3
+#define RIGHT_MOTOR_IN2   10
+#define RIGHT_MOTOR_PWM   11
 
 // -----------------------------
 // Encoder Pin Definitions
 // -----------------------------
-#define LEFT_ENCODER_A    18
-#define LEFT_ENCODER_B    14  // the robot's green wire: the wiring diagram has it here, not on v1.1's 17
-#define RIGHT_ENCODER_A   4
-#define RIGHT_ENCODER_B   5
+#define LEFT_ENCODER_A    4
+#define LEFT_ENCODER_B    5
+#define RIGHT_ENCODER_A   18
+#define RIGHT_ENCODER_B   14  // the robot's green wire: the wiring diagram has it here, not on v1.1's 17
 
-// Spare left pins: 13 was the left A before v1.1, and 17 is the B pin v1.1 planned. Nothing uses
-// them now. The `d` command reports them so a wire on either shows up.
+// Spare pins beside 18 and 14: 13 was that side's A before v1.1, and 17 is the B pin v1.1 planned.
+// Nothing uses them now. The `d` command reports them so a wire on either shows up.
 #define OLD_LEFT_ENCODER_A 13
 #define OLD_LEFT_ENCODER_B 17
 
 // A positive `m` request on a wheel must make its count go up. Raw counts go up when A rises
-// while B is low. Set from the first drive on 2026-11-09: with the robot's wiring the left count
-// ran backwards on a forward request, and the right one was right.
+// while B is low. Set from the first drive on 2026-11-09, and unchanged by the swapped plugs,
+// since each encoder moved with its motor.
 // Flip one if the wheel test shows wrong_dir: the bridge expects this rule on both wheels.
 #define LEFT_ENCODER_SIGN   (-1)
 #define RIGHT_ENCODER_SIGN  (-1)
@@ -93,14 +100,15 @@
 // The bridge's encoder_cpr must hold the same number.
 #define ENCODER_CPR       1497
 
-// PWM (0-1023) for a requested speed = DEADBAND + SLOPE * speed. Set for the floor on 2026-11-10
-// from wheel_test.py hold at 0.03 and 0.15 m/s (docs/FIRST_DRIVE.md step 10): with these, the
-// trims there stayed within 11. In the air the wheels need less: deadband 51 and 42, slope 1,743
-// and 1,732, measured with wheel_test.py ff.
-#define FF_DEADBAND_LEFT  58      // PWM at which the turning wheel stops
-#define FF_DEADBAND_RIGHT 88
-#define FF_SLOPE_LEFT     1893    // extra PWM per m/s
-#define FF_SLOPE_RIGHT    1740
+// PWM (0-1023) for a requested speed = DEADBAND + SLOPE * speed. Set for the floor on 2026-11-23
+// from wheel_test.py hold at 0.03 and 0.15 m/s (docs/FIRST_DRIVE.md step 10), after the rewiring:
+// the 2026-11-10 values (deadband 58 and 88, slope 1,893 and 1,740) then left trims down to -59.
+// With these, the trims there ended within 5 and stayed within 7. In the air the wheels need less:
+// deadband 51 and 42, slope 1,743 and 1,732, measured with wheel_test.py ff on 2026-11-10.
+#define FF_DEADBAND_LEFT  55      // PWM at which the turning wheel stops
+#define FF_DEADBAND_RIGHT 54
+#define FF_SLOPE_LEFT     1565    // extra PWM per m/s
+#define FF_SLOPE_RIGHT    1660
 
 // Short push when a wheel starts from rest, because starting takes more PWM than keeping going.
 // It must start the wheel on the floor. A wheel that a kick doesn't move stays stopped until its
